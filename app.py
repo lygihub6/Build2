@@ -84,22 +84,15 @@ st.markdown(MOCKUP_CSS, unsafe_allow_html=True)
 
 
 # --- Secrets ---------------------------------------------------------------
+import streamlit as st, re
 API_KEY = st.secrets.get("GEMINI_API_KEY","")
-st.write("Key present:", bool(API_KEY))
-if API_KEY:
-    try:
-        client = genai.Client(api_key=API_KEY)
-        _ = client.models.generate_content(
-            model="gemini-flash-lite-latest",
-            contents=[types.Content(parts=[types.Part(text="ping")])],
-            config=types.GenerateContentConfig(system_instruction="")
-        )
-        st.success("Gemini is ready ✅")
-    except Exception as e:
-        st.error(f"Key present but invalid/blocked: {e}")
-else:
-    st.warning("GEMINI_API_KEY missing in Streamlit secrets")
 
+st.write({
+    "present": bool(API_KEY),
+    "looks_like_ai_studio": API_KEY.startswith("AIza"),
+    "length": len(API_KEY),
+    "has_whitespace": bool(re.search(r"\s", API_KEY)),
+})
 
 # --- Identity / System Instructions ---------------------------------------
 def load_developer_prompt() -> str:
