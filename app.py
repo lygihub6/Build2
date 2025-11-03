@@ -1,226 +1,95 @@
+
 # --- Imports ---------------------------------------------------------------
 import os
 import json
 import time
-import uuid
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 
 import streamlit as st                 # Streamlit
 from PIL import Image                  # Image display
 
-# Google GenAI SDK (per guideline)
+# Google GenAI SDK (per your guidelines)
 from google import genai               # Google GenAI SDK
 from google.genai import types         # Tools (e.g., Google Search), configs
 
-# --- Page Config -----------------------------------------------------------
-st.set_page_config(page_title="Sylvia — Learning Facilitator", page_icon="🎓", layout="wide")
 
-# --- CSS: Theme based on provided mockup -----------------------------------
+# --- Page Config -----------------------------------------------------------
+st.set_page_config(
+    page_title="Sylvia — Learning Facilitator",
+    page_icon="🎓",
+    layout="wide",
+)
+
+
+# --- CSS: Match the provided screenshot -----------------------------------
 MOCKUP_CSS = """
 <style>
-:root {
-  --bg: #E8F5E9;
-  --ink: #0D2B12;
-  --muted: #5f7466;
-  --brand: #1B5E20;
-  --brand-700: #164a19;
-  --brand-800: #0f3712;
-  --card: #ffffff;
-  --ring: #0f9159;
+:root{
+  --bg:#E8F5E9; --ink:#0D2B12; --muted:#5f7466; --brand:#1B5E20;
+  --brand-700:#164a19; --brand-800:#0f3712; --card:#ffffff; --ring:#0f9159;
 }
+html, body, .stApp { background: var(--bg) !important; color: var(--ink); font-size:16px; }
+.block-container { padding-top: 1.2rem; padding-bottom: 2rem; }
 
-/* Streamlit base */
-html, body, .stApp {
-  background: var(--bg) !important;
-  color: var(--ink);
-  font-size: 16px; /* enforce min 16px body */
-}
+/* Header */
+.header-card{ background:var(--card); border-radius:20px; padding:24px 28px;
+  box-shadow:0 6px 18px rgba(0,0,0,.08); margin-bottom:18px; }
+.header-title{ color:var(--brand); font-size:28px; font-weight:800; display:flex; gap:10px; align-items:center; }
+.header-sub{ color:var(--muted); font-size:17px; }
 
 /* Cards */
-.block-container {
-  padding-top: 1.2rem;
-  padding-bottom: 2rem;
-}
+.card{ background:var(--card); border-radius:20px; padding:22px; box-shadow:0 6px 18px rgba(0,0,0,.08); margin-bottom:16px; }
+.section-title{ display:flex; align-items:center; gap:10px; color:var(--brand); font-size:24px; font-weight:800; margin:0 0 14px 0; }
+.section-title.small{ font-size:20px; }
 
-/* Header card mimic */
-.header-card {
-  background: var(--card);
-  border-radius: 20px;
-  padding: 24px 28px;
-  box-shadow: 0 6px 18px rgba(0,0,0,.08);
-  margin-bottom: 18px;
-}
-.header-title {
-  color: var(--brand); 
-  font-size: 28px;     /* H1 ~28px */
-  display: flex; 
-  align-items: center; 
-  gap: 10px;
-  margin: 0 0 6px 0;
-}
-.header-sub {
-  color: var(--muted);
-  font-size: 17px;
-}
+/* Left Quick Actions (all st.button) */
+.stButton>button{ background:var(--brand)!important; color:#fff!important; border:0; border-radius:12px; padding:14px 16px;
+  font-weight:700; transition:all .2s ease; width:100%; margin-bottom:10px; }
+.stButton>button:hover{ background:var(--brand-700)!important; transform:translateY(-1px); box-shadow:0 5px 20px rgba(27,94,32,.25); }
 
-/* Cards */
-.card {
-  background: var(--card);
-  border-radius: 15px;
-  padding: 18px;
-  box-shadow: 0 6px 18px rgba(0,0,0,.08);
-  margin-bottom: 16px;
-}
-
-/* Section titles */
-.card h3, .card h2, .card h4 {
-  color: var(--brand);
-  margin: 0 0 12px 0;
-}
-h2 { font-size: 22px; } /* H2 ~22px */
-h3 { font-size: 18px; } /* H3 ~18px */
-
-/* Buttons */
-.stButton>button {
-  background: var(--brand) !important;
-  color: #fff !important;
-  border: 0;
-  border-radius: 10px;
-  padding: 10px 16px;
-  font-weight: 600;
-  transition: all .2s ease;
-}
-.stButton>button:hover {
-  background: var(--brand-700) !important;
-  transform: translateY(-1px);
-  box-shadow: 0 5px 20px rgba(27, 94, 32, 0.25);
-}
-
-/* Quick Actions grid look */
-.quick-btn {
-  width: 100%;
-  text-align: left;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  border-radius: 10px;
-  padding: 12px 14px;
-  margin-bottom: 8px;
-  background: var(--brand);
-  color: #fff !important;
-  font-weight: 600;
-}
-.quick-btn:hover { background: var(--brand-700); }
-.quick-btn small { opacity: .9; font-weight: 400; }
-
-/* Chat area */
-.chat-wrap {
-  display: flex; 
-  flex-direction: column; 
-  gap: 12px;
-}
-.messages {
-  background: var(--bg);
-  border-radius: 10px;
-  padding: 14px;
-  height: 440px;
-  overflow-y: auto;
-  border: 1px solid #d4eed8;
-}
-.msg {
-  margin-bottom: 12px;
-  padding: 12px 14px;
-  border-radius: 12px;
-  max-width: 85%;
-  line-height: 1.55;
-  font-size: 16px;
-}
-.msg.assistant {
-  background: var(--brand);
-  color: #fff;
-  margin-right: auto;
-  border-bottom-left-radius: 6px;
-}
-.msg.user {
-  background: #d4eed8;
-  color: var(--ink);
-  margin-left: auto;
-  border-bottom-right-radius: 6px;
-}
+/* Chat */
+.chat-wrap{ display:flex; flex-direction:column; gap:12px; }
+.messages{ background:#f0f9f2; border-radius:16px; padding:18px; min-height:420px; max-height:520px;
+  overflow-y:auto; border:1px solid #d4eed8; }
+.msg{ margin-bottom:14px; padding:14px 16px; border-radius:16px; max-width:70ch; line-height:1.55; font-size:16px; }
+.msg.assistant{ background:var(--brand); color:#fff; border-bottom-left-radius:6px; width:fit-content; }
+.msg.user{ background:#d4eed8; color:var(--ink); margin-left:auto; border-bottom-right-radius:6px; width:fit-content; }
 
 /* Input row */
-.input-row {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 10px;
-}
+.input-row{ display:grid; grid-template-columns:1fr 120px; gap:12px; margin-top:12px; }
+.stTextInput>div>div>input{ padding:14px 16px; border:2px solid #d4eed8; border-radius:999px; font-size:16px; }
+.stTextInput>div>div>input:focus{ border-color:var(--ring); box-shadow:0 0 0 3px rgba(15,145,89,.12); }
+.input-row .stButton>button{ background:var(--brand)!important; color:#fff!important; border-radius:999px; padding:12px 20px; font-weight:800; }
+.input-row .stButton>button:hover{ background:var(--brand-700)!important; }
 
 /* Stats */
-.stat-box {
-  background: var(--bg);
-  padding: 12px;
-  border-radius: 10px;
-  text-align: center;
-  border: 1px solid #d4eed8;
-}
-.stat-box h4 {
-  color: var(--brand);
-  font-size: 20px;
-  margin: 0 0 4px 0;
-}
-.stat-box p {
-  color: var(--muted);
-  margin: 0;
-  font-size: 14px;
-}
-.progress {
-  background: #d4eed8;
-  height: 8px;
-  border-radius: 10px;
-  overflow: hidden;
-  margin-top: 8px;
-}
-.progress > div {
-  background: var(--brand);
-  height: 8px;
-  width: 65%;
-}
+.stat-box{ background:#f7fbf8; padding:16px; border-radius:16px; text-align:center; border:1px solid #e0f0e5; margin-bottom:12px; }
+.stat-box h4{ color:var(--brand); font-size:34px; margin:0 0 6px 0; font-weight:800; }
+.stat-box p{ color:var(--muted); margin:0; font-size:14px; }
+.progress{ background:#d4eed8; height:8px; border-radius:10px; overflow:hidden; margin-top:8px; }
+.progress>div{ background:var(--brand); height:8px; width:75%; }
 
-/* Recent sessions list */
-.session-item {
-  background: var(--bg);
-  border-left: 4px solid var(--brand);
-  border-radius: 10px;
-  padding: 10px 12px;
-  margin-bottom: 10px;
-  cursor: pointer;
-}
-.session-item:hover { background: #d4eed8; }
-.session-item h4 {
-  margin: 0 0 4px 0;
-  color: var(--ink);
-  font-size: 16px;
-}
-.session-item p {
-  margin: 0;
-  color: var(--muted);
-  font-size: 14px;
-}
-
-/* Advanced expander text size guard */
-.css-1v3fvcr p, .css-1v3fvcr li { font-size: 16px !important; }
+/* Recent sessions (thick green scrollbar look for preview; list kept short in app) */
+.recent{ max-height:380px; overflow-y:auto; padding-right:6px; }
+.recent::-webkit-scrollbar{ width:10px; }
+.recent::-webkit-scrollbar-track{ background:#e9f6ec; border-radius:12px; }
+.recent::-webkit-scrollbar-thumb{ background:var(--brand); border-radius:12px; }
+.recent::-webkit-scrollbar-thumb:hover{ background:var(--brand-700); }
+.session-item{ background:#f0f9f2; border-left:6px solid var(--brand); border-radius:12px; padding:12px 14px; margin-bottom:10px; }
+.session-item h4{ margin:0 0 4px 0; color:var(--ink); font-size:16px; font-weight:800; }
+.session-item p{ margin:0; color:var(--muted); font-size:14px; }
 </style>
 """
 st.markdown(MOCKUP_CSS, unsafe_allow_html=True)
+
 
 # --- Secrets ---------------------------------------------------------------
 API_KEY = st.secrets.get("GEMINI_API_KEY", "")
 if not API_KEY:
     st.warning("⚠️ 'GEMINI_API_KEY' is not set in st.secrets. Add it before deploying.")
-
-# Client
 client = genai.Client(api_key=API_KEY) if API_KEY else None
+
 
 # --- Identity / System Instructions ---------------------------------------
 def load_developer_prompt() -> str:
@@ -237,10 +106,18 @@ def load_developer_prompt() -> str:
 
 system_instructions = load_developer_prompt()
 
+
 # --- Session State ---------------------------------------------------------
 if "messages" not in st.session_state:
     st.session_state.messages: List[Dict[str, str]] = [
-        {"role": "assistant", "content": "Hello! I’m Sylvia. What task are you working on today?"}
+        {
+            "role": "assistant",
+            "content": (
+                "Hello! I'm Sylvia, your learning facilitator. I'm here to help you develop effective "
+                "learning strategies and achieve your academic goals through self-regulated learning. "
+                "What task are you working on today?"
+            ),
+        }
     ]
 if "sessions" not in st.session_state:
     st.session_state.sessions: Dict[str, Dict[str, Any]] = {}
@@ -251,7 +128,8 @@ if "session_start_ts" not in st.session_state:
 if "goals_count" not in st.session_state:
     st.session_state.goals_count = 0
 if "coach_mode" not in st.session_state:
-    st.session_state.coach_mode: Optional[str] = None  # active quick action
+    st.session_state.coach_mode: Optional[str] = None
+
 
 # --- Silent Coaching Prompts (Optional enhancement) ------------------------
 COACH_PROMPTS = {
@@ -294,6 +172,7 @@ COACH_PROMPTS = {
     ),
 }
 
+
 # --- Header ---------------------------------------------------------------
 with st.container():
     st.markdown(
@@ -301,55 +180,49 @@ with st.container():
         <div class="header-card">
           <div class="header-title">🎓 Sylvia</div>
           <div class="header-sub">
-            Your personal learning facilitator, designed to help you develop mastery goals, effective learning strategies, and self-regulated learning capacities for deep, meaningful learning.
+            Your personal learning facilitator, designed to help you develop mastery goals, effective learning strategies,
+            and self-regulated learning capacities for deep, meaningful learning.
           </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-# --- Layout: 3 columns -----------------------------------------------------
-col_left, col_center, col_right = st.columns([0.9, 2, 0.9], gap="large")
+
+# --- Layout: 3 columns (left actions, center chat, right sidebar) ----------
+col_left, col_center, col_right = st.columns([0.95, 2, 1.05], gap="large")
+
 
 # --- Left: Quick Actions ---------------------------------------------------
 with col_left:
     st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown("### 🚀 Quick Actions", unsafe_allow_html=True)
+    st.markdown('<div class="section-title">🚀 Quick Actions</div>', unsafe_allow_html=True)
 
-    def qa_btn(label: str, key: str, help_text: str = "") -> bool:
-        return st.button(f"{label}", key=key, help=help_text, use_container_width=True)
-
-    # Map buttons to coach modes
-    quick_actions = [
-        ("🎯 Set Learning Goals", "goal"),
-        ("📋 Analyze Task", "taskanalysis"),
-        ("💡 Learning Strategies", "strategies"),
-        ("⚡ Get Motivated", "motivation"),
-        ("⏱️ Time Log / Plan", "timelog"),
-        ("📚 Find Resources", "resources"),
-        ("🤔 Reflect on Learning", "reflection"),
-        ("💬 Request Feedback", "feedback"),
-        ("💾 Save Session", "save"),
-    ]
-    for label, mode in quick_actions:
-        if qa_btn(label, f"qa_{mode}"):
+    def qa(label: str, mode: str, seed: str) -> None:
+        if st.button(label, key=f"qa_{mode}"):
             st.session_state.coach_mode = mode
-            # Lightweight assistant prompt to guide next turn
-            assistant_seed = {
-                "goal": "Let’s set 1–3 mastery goals for this task. What do you really want to learn or master?",
-                "taskanalysis": "Tell me the task requirements, due date, rubric (if any), and any constraints.",
-                "strategies": "I can propose several strategies. Tell me your timeline and where you usually get stuck.",
-                "motivation": "What about this task matters to you (or your future self)?",
-                "timelog": "How much time do you have today? We can plan a focused 25-minute block.",
-                "resources": "Want me to suggest a few credible resources aligned with your goals?",
-                "reflection": "How did it go so far? What worked, what didn’t, and what will you change?",
-                "feedback": "What kind of feedback do you want: clarity, structure, evidence, or tone?",
-                "save": "I’ll summarize this session and save it. Anything you want to highlight first?",
-            }[mode]
-            st.session_state.messages.append({"role": "assistant", "content": assistant_seed})
+            st.session_state.messages.append({"role": "assistant", "content": seed})
 
-    if qa_btn("➕ New Session", "qa_new_session"):
-        # Archive current session
+    qa("🎯 Set Learning Goals", "goal",
+       "Let’s set 1–3 mastery goals for this task. What do you want to learn or master?")
+    qa("📋 Analyze Task", "taskanalysis",
+       "Share the task requirements, rubric, due date, and any constraints.")
+    qa("💡 Learning Strategies", "strategies",
+       "I can propose several strategies. Tell me your timeline and where you usually get stuck.")
+    qa("⚡ Get Motivated", "motivation",
+       "What about this task matters to you (or your future self)?")
+    qa("⏱️ Time Management", "timelog",
+       "How much time do you have today? We can plan a focused 25-minute block.")
+    qa("📚 Find Resources", "resources",
+       "Want me to suggest a few credible resources aligned with your goals?")
+    qa("🤔 Reflect on Learning", "reflection",
+       "How did it go so far? What worked, what didn’t, and what will you change?")
+    qa("💬 Request Feedback", "feedback",
+       "What kind of feedback do you want: clarity, structure, evidence, or tone?")
+    qa("💾 Save Session", "save",
+       "I’ll summarize this session and save it. Anything you want to highlight first?")
+
+    if st.button("➕ New Session", key="qa_new_session"):
         sid = st.session_state.current_session_id
         st.session_state.sessions[sid] = {
             "id": sid,
@@ -359,7 +232,6 @@ with col_left:
             "elapsed_sec": int(time.time() - st.session_state.session_start_ts),
             "title": f"Session {sid}",
         }
-        # Reset current
         st.session_state.current_session_id = datetime.now().strftime("%Y%m%d-%H%M%S")
         st.session_state.messages = [
             {"role": "assistant", "content": "New session started. What would you like to work on?"}
@@ -370,27 +242,24 @@ with col_left:
 
     st.markdown("</div>", unsafe_allow_html=True)
 
+
 # --- Center: Chat Area -----------------------------------------------------
 with col_center:
     st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown("## 💬 Learning Conversation", unsafe_allow_html=True)
+    st.markdown('<div class="section-title">💬 Learning Conversation</div>', unsafe_allow_html=True)
 
-    # Messages
+    # Message bubbles inside scrollable chat canvas
     st.markdown('<div class="chat-wrap"><div class="messages">', unsafe_allow_html=True)
     for m in st.session_state.messages:
         role_class = "assistant" if m["role"] == "assistant" else "user"
-        st.markdown(
-            f'<div class="msg {role_class}">{m["content"]}</div>',
-            unsafe_allow_html=True,
-        )
+        st.markdown(f'<div class="msg {role_class}">{m["content"]}</div>', unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
     # Input row
-    with st.container():
-        st.markdown('<div class="input-row">', unsafe_allow_html=True)
-        user_text = st.text_input("Type your message", label_visibility="collapsed", key="user_text")
-        send_clicked = st.button("Send", type="primary")
-        st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown('<div class="input-row">', unsafe_allow_html=True)
+    user_text = st.text_input("Type your message", label_visibility="collapsed", key="user_text")
+    send_clicked = st.button("Send", key="send_btn")
+    st.markdown("</div>", unsafe_allow_html=True)
 
     # Advanced options
     with st.expander("Advanced"):
@@ -398,24 +267,24 @@ with col_center:
         max_tokens = st.slider("Max output tokens", 256, 4096, 2048, 64)
         use_search_tool = st.checkbox("Enable Google Search grounding (optional)", value=False)
         show_system_info = st.checkbox("Show identity.txt diagnostics", value=False)
-
         if show_system_info:
             st.caption("identity.txt status:")
             st.write(f"Characters: {len(system_instructions)}")
-            st.code(system_instructions[:400] + ("\n...\n" if len(system_instructions) > 400 else "") + system_instructions[-400:])
+            st.code(
+                system_instructions[:400]
+                + ("\n...\n" if len(system_instructions) > 400 else "")
+                + system_instructions[-400:]
+            )
 
-    # --- Gemini Call Helper ------------------------------------------------
+    # Gemini call helper
     def call_model(user_message: str, coach_mode: Optional[str]) -> str:
-        """Send conversation to Gemini with optional silent coaching prompt."""
         if not client:
             return "Model not initialized—set GEMINI_API_KEY in Streamlit secrets."
 
-        # Build tool list conditionally
         tools = []
         if use_search_tool:
             tools.append(types.Tool(google_search=types.GoogleSearch()))
 
-        # Generation config (per guideline)
         generation_cfg = types.GenerateContentConfig(
             system_instruction=system_instructions,
             tools=tools if tools else None,
@@ -424,33 +293,26 @@ with col_center:
             max_output_tokens=int(max_tokens),
         )
 
-        # Compose contents: (optional coach prompt) + conversation + last user message
+        # Prepare parts: (optional) coach prompt + truncated transcript + new user message
         parts: List[types.Part] = []
-
-        # Silent coaching (Optional section)
         if coach_mode and coach_mode in COACH_PROMPTS:
             parts.append(types.Part(text=f"[Coach Instruction]\n{COACH_PROMPTS[coach_mode]}"))
 
-        # Include recent transcript (truncate to last ~16 turns for token safety)
         recent_msgs = st.session_state.messages[-16:]
         for msg in recent_msgs:
             prefix = "User: " if msg["role"] == "user" else "Assistant: "
             parts.append(types.Part(text=f"{prefix}{msg['content']}"))
 
-        # Append the new user message
         parts.append(types.Part(text=f"User: {user_message}"))
 
-        # Minimal call (non-streaming for SDK consistency)
         try:
             resp = client.models.generate_content(
                 model="gemini-flash-lite-latest",
                 contents=[types.Content(parts=parts)],
                 config=generation_cfg,
             )
-            # Fallback if text is None
             text = getattr(resp, "text", None)
             if not text and hasattr(resp, "candidates") and resp.candidates:
-                # Try to extract candidate text if available
                 for c in resp.candidates:
                     if getattr(c, "content", None) and c.content and getattr(c.content, "parts", None):
                         for p in c.content.parts:
@@ -462,30 +324,33 @@ with col_center:
 
     # Handle send
     if send_clicked and user_text.strip():
-        st.session_state.messages.append({"role": "user", "content": user_text.strip()})
-        # Heuristic: if user sets goals, bump counter (simple detection)
-        if "goal" in (st.session_state.coach_mode or "") and any(k in user_text.lower() for k in ["goal", "learn", "master", "my goal"]):
+        msg = user_text.strip()
+        st.session_state.messages.append({"role": "user", "content": msg})
+        # simple heuristic to bump goals count when in goal mode
+        if "goal" in (st.session_state.coach_mode or "") and any(
+            k in msg.lower() for k in ["goal", "learn", "master", "my goal"]
+        ):
             st.session_state.goals_count += 1
 
-        assistant_text = call_model(user_text.strip(), st.session_state.coach_mode)
+        assistant_text = call_model(msg, st.session_state.coach_mode)
         st.session_state.messages.append({"role": "assistant", "content": assistant_text})
-        st.session_state.coach_mode = None  # consume coach prompt
+        st.session_state.coach_mode = None
         st.rerun()
 
     st.markdown("</div>", unsafe_allow_html=True)
 
-# --- Right: Stats + Sessions ----------------------------------------------
+
+# --- Right: Current Session + Recent Sessions ------------------------------
 with col_right:
-    # Stats
+    # Current Session
     st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown("### 📊 Current Session", unsafe_allow_html=True)
+    st.markdown('<div class="section-title small">📊 Current Session</div>', unsafe_allow_html=True)
     elapsed_sec = int(time.time() - st.session_state.session_start_ts)
     expected_min = 60  # placeholder expectation
-    used = f"{int(elapsed_sec/60)}m / {expected_min}m"
     st.markdown(
         f"""
         <div class="stat-box">
-          <h4>{used}</h4>
+          <h4>{int(elapsed_sec/60)}m / {expected_min}m</h4>
           <p>Time Used / Expected</p>
           <div class="progress"><div style="width:{min(100, int((elapsed_sec/60)/expected_min*100))}%"></div></div>
         </div>
@@ -494,63 +359,25 @@ with col_right:
     )
     st.markdown(
         f"""
-        <div class="stat-box" style="margin-top:10px">
+        <div class="stat-box">
           <h4>{st.session_state.goals_count}</h4>
           <p>Goals Set</p>
         </div>
         """,
         unsafe_allow_html=True,
     )
-
-    # Export options
-    with st.expander("Export / Utilities"):
-        # Download transcript JSON
-        sid = st.session_state.current_session_id
-        transcript = {
-            "id": sid,
-            "created": sid,
-            "messages": st.session_state.messages,
-            "elapsed_sec": elapsed_sec,
-            "goals_count": st.session_state.goals_count,
-        }
-        st.download_button(
-            "Download transcript (JSON)",
-            data=json.dumps(transcript, ensure_ascii=False, indent=2),
-            file_name=f"sylvia_session_{sid}.json",
-            mime="application/json",
-            use_container_width=True,
-        )
-        # Download transcript as Markdown
-        md_lines = [f"# Sylvia Session {sid}", ""]
-        for m in st.session_state.messages:
-            who = "🧑 User" if m["role"] == "user" else "🤖 Sylvia"
-            md_lines.append(f"**{who}:** {m['content']}")
-            md_lines.append("")
-        st.download_button(
-            "Download transcript (Markdown)",
-            data="\n".join(md_lines),
-            file_name=f"sylvia_session_{sid}.md",
-            mime="text/markdown",
-            use_container_width=True,
-        )
-        if st.button("Clear chat"):
-            st.session_state.messages = [{"role": "assistant", "content": "Chat cleared. What next?"}]
-            st.session_state.coach_mode = None
-            st.session_state.goals_count = 0
-            st.session_state.session_start_ts = time.time()
-            st.rerun()
-
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # Recent Sessions
+    # Recent Sessions (stacked under stats)
     st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown("### 📁 Recent Sessions", unsafe_allow_html=True)
+    st.markdown('<div class="section-title small">🗂️ Recent Sessions</div>', unsafe_allow_html=True)
 
     if not st.session_state.sessions:
         st.caption("No archived sessions yet. Use **Save Session** or **New Session**.")
     else:
-        # Show up to 8 recent
+        # Limit visible items so the sidebar stays compact like the screenshot
         items = sorted(st.session_state.sessions.values(), key=lambda x: x["id"], reverse=True)[:8]
+        st.markdown('<div class="recent">', unsafe_allow_html=True)
         for s in items:
             c1, c2 = st.columns([0.7, 0.3])
             with c1:
@@ -568,14 +395,14 @@ with col_right:
                     st.session_state.current_session_id = s["id"]
                     st.session_state.messages = s["messages"]
                     st.session_state.goals_count = s.get("goals_count", 0)
-                    # Reset timer from now (we can't resume exact start reliably)
                     st.session_state.session_start_ts = time.time()
                     st.session_state.coach_mode = None
                     st.rerun()
-
+        st.markdown('</div>', unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
-# --- Save Session Action (when clicked) ------------------------------------
+
+# --- Save Session helper ---------------------------------------------------
 def save_current_session():
     sid = st.session_state.current_session_id
     st.session_state.sessions[sid] = {
@@ -587,10 +414,14 @@ def save_current_session():
         "title": f"Session {sid}",
     }
 
-# If last action was "save", auto-save and confirm
+
+# If last action was "save", auto-save and confirm in the chat
 if st.session_state.coach_mode == "save":
     save_current_session()
     st.session_state.messages.append(
-        {"role": "assistant", "content": "✅ Session saved. You can download it from **Export / Utilities** or load it later in **Recent Sessions**."}
+        {
+            "role": "assistant",
+            "content": "✅ Session saved. Download from **Export / Utilities** (Advanced) or load it later in **Recent Sessions**.",
+        }
     )
     st.session_state.coach_mode = None
