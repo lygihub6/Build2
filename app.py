@@ -84,10 +84,21 @@ st.markdown(MOCKUP_CSS, unsafe_allow_html=True)
 
 
 # --- Secrets ---------------------------------------------------------------
-API_KEY = st.secrets.get("GEMINI_API_KEY", "")
-if not API_KEY:
-    st.warning("⚠️ 'GEMINI_API_KEY' is not set in st.secrets. Add it before deploying.")
-client = genai.Client(api_key=API_KEY) if API_KEY else None
+API_KEY = st.secrets.get("GEMINI_API_KEY","")
+st.write("Key present:", bool(API_KEY))
+if API_KEY:
+    try:
+        client = genai.Client(api_key=API_KEY)
+        _ = client.models.generate_content(
+            model="gemini-flash-lite-latest",
+            contents=[types.Content(parts=[types.Part(text="ping")])],
+            config=types.GenerateContentConfig(system_instruction="")
+        )
+        st.success("Gemini is ready ✅")
+    except Exception as e:
+        st.error(f"Key present but invalid/blocked: {e}")
+else:
+    st.warning("GEMINI_API_KEY missing in Streamlit secrets")
 
 
 # --- Identity / System Instructions ---------------------------------------
