@@ -1,4 +1,3 @@
-
 # --- Imports ---------------------------------------------------------------
 import os
 import io
@@ -10,9 +9,13 @@ from typing import List, Dict, Any, Optional
 import streamlit as st                 # Streamlit
 from PIL import Image                  # Image display
 
-# Google GenAI SDK (modern SDK with tools support)
-from google import genai               # Google GenAI SDK
-from google.genai import types         # Tools (e.g., Google Search), configs
+# Google GenAI SDK (modern)
+try:
+    from google import genai               # Google GenAI SDK
+    from google.genai import types         # configs & tools
+except Exception as _e:
+    genai = None
+    types = None
 
 
 # --- Page Config -----------------------------------------------------------
@@ -24,201 +27,89 @@ st.set_page_config(
 
 
 # --- Secrets ---------------------------------------------------------------
-# In Streamlit Cloud, define in Secrets: GEMINI_API_KEY = "yourapikey"
 API_KEY = st.secrets.get("GEMINI_API_KEY", "")
 if not API_KEY:
     st.warning("⚠️ 'GEMINI_API_KEY' is not set in st.secrets. Add it before deploying.")
-client = genai.Client(api_key=API_KEY)
+if genai:
+    client = genai.Client(api_key=API_KEY) if API_KEY else None
+else:
+    client = None
 
 
 # --- Identity / System Instructions ---------------------------------------
-# Reads 'identity.txt' if present; otherwise uses a friendly default.
 @st.cache_data(show_spinner=False)
 def load_developer_prompt() -> str:
     try:
-        with open("identity.txt", "r", encoding="utf-8") as f:  # <-- name must match exactly
+        with open("identity.txt", "r", encoding="utf-8") as f:
             return f.read()
     except FileNotFoundError:
         st.warning("⚠️ 'identity.txt' not found. Using default prompt.")
         return (
-            "You are Sylvia, a helpful learning facilitator. Be friendly, supportive, "
-            "and provide clear, concise, SRL-framed responses."
+            "You are Sylvia, a supportive learning facilitator. "
+            "Use SRL framing: goals → task analysis → strategies → time plan → resources → reflect → feedback."
         )
 
-system_instructions = load_developer_prompt()
+SYSTEM_PROMPT = load_developer_prompt()
 
 
-# --- Helpers: Session State -----------------------------------------------
+# --- Session State ---------------------------------------------------------
 def _init_state():
     ss = st.session_state
-    ss.setdefault("chat_history", [])   # list of {"role": "user"|"assistant"|"system", "content": str}
-    ss.setdefault("files", [])          # list of {"name": str, "id": str, "mime": str}
-    ss.setdefault("use_search", False)  # toggle for Google Search grounding
-    ss.setdefault("use_code_exec", False)  # toggle for code execution tool
-    ss.setdefault("progress_pct", 0)    # right-panel progress bar percent
-    ss.setdefault("path_step", 1)       # 1..5 goals->resources
+    ss.setdefault("chat_history", [])          # list of {role, content}
+    ss.setdefault("files", [])                 # list of {"name": str, "bytes": int, "mime": str}
+    ss.setdefault("ground_search", False)      # UI checkbox
+    ss.setdefault("use_code_exec", False)
+    ss.setdefault("progress_pct", 0)
+    ss.setdefault("path_step", 1)
     ss.setdefault("sessions_dir", "sessions")
-    ss.setdefault("url_context", "")    # optional URL(s)
-    # Timer / Pomodoro (simple, step-based)
-    ss.setdefault("timer_minutes", 25)      # current target duration
+    # Timer
+    ss.setdefault("timer_minutes", 25)
     ss.setdefault("timer_running", False)
     ss.setdefault("timer_start_ts", 0.0)
-    ss.setdefault("timer_elapsed", 0)       # seconds elapsed in current run
-    ss.setdefault("time_log", [])           # list of {"minutes": int, "label": str, "ended_at": iso}
+    ss.setdefault("timer_elapsed", 0)
+    ss.setdefault("time_log", [])
+    ss.setdefault("_pending_action", None)
 
 _init_state()
 
 
-# --- Files API -------------------------------------------------------------
-def upload_to_gemini(file: Any, display_name: str) -> Optional[Dict[str, str]]:
-    """
-    Upload a Streamlit file-like object to Gemini Files API and return a dict with id, name, mime.
-    """
-    try:
-        # file is a UploadedFile with .read() and .type
-        # We pass a bytes-like object via file=file
-        b = file.read()
-        f = io.BytesIO(b)
-        uploaded = client.files.upload(file=f, display_name=display_name)
-        return {"name": display_name, "id": uploaded.name, "mime": getattr(uploaded, "mime_type", "application/octet-stream")}
-    except Exception as e:
-        st.error(f"Upload failed for {display_name}: {e}")
-        return None
-
-
-# --- Tools (Optional): Search, Code Execution ------------------------------
-def build_tools(enable_search: bool, enable_code_exec: bool):
-    tools = []
-    if enable_search:
-        tools.append(types.Tool(google_search=types.GoogleSearch()))
-    if enable_code_exec:
-        # Exposes a sand-boxed python execution (Gemini Code Execution tool)
-        tools.append(types.Tool(code_execution=types.CodeExecution()))
-    return tools
-
-
-# --- Silent Action Prompts -------------------------------------------------
+# --- “Silent” Action Nudges -----------------------------------------------
 ACTION_PROMPTS = {
-    "goal": "SILENT_ACTION: The user pressed 'Goals'. Use SRL to help define 1-2 mastery goals. Ask exactly one short follow-up question. Keep it under 4 sentences.",
-    "taskanalysis": "SILENT_ACTION: The user pressed 'Task Analysis'. Identify prior knowledge, task constraints, and success criteria. Ask one clarifying question.",
-    "learning strategies": "SILENT_ACTION: The user pressed 'Learning Strategies'. Provide 3 concrete strategies tied to the stated goal and task. Ask one short check question.",
-    "time management": "SILENT_ACTION: The user pressed 'Time Management'. Suggest a Pomodoro-based micro-plan (e.g., 25-5 cycles) and a tiny next step (≤2 minutes).",
-    "resources": "SILENT_ACTION: The user pressed 'Resources'. Suggest 3 types of targeted resources. If Search is enabled, ground suggestions.",
-    "reflection": "SILENT_ACTION: The user pressed 'Reflect'. Prompt reflection on goals met, obstacles, strategies tried, emotion, effort. Keep it to 4 compact bullets.",
-    "feedback": "SILENT_ACTION: The user pressed 'Feedback'. Provide 2 strengths and 2 growth points based on the last messages. Offer one concrete refinement.",
-    "save": "SILENT_ACTION: Summarize and bookmark key points from this chat turn for next time. Keep it in bullet notes.",
+    "goal": "SILENT_ACTION: User pressed Goals. Help define 1–2 mastery goals. Ask ONE short follow-up question.",
+    "taskanalysis": "SILENT_ACTION: User pressed Task Analysis. Identify prior knowledge, constraints, success criteria. Ask ONE clarifier.",
+    "learning strategies": "SILENT_ACTION: User pressed Learning Strategies. Suggest 3 concrete strategies tied to their goal.",
+    "time management": "SILENT_ACTION: User pressed Time Management. Offer a 25–5 Pomodoro micro-plan and a ≤2 min next step.",
+    "resources": "SILENT_ACTION: User pressed Resources. Suggest 3 targeted resource types. If search is enabled, cite likely sources.",
+    "reflection": "SILENT_ACTION: User pressed Reflect. Prompt reflection on goals met, obstacles, strategies tried, emotion, effort (≤4 bullets).",
+    "feedback": "SILENT_ACTION: User pressed Feedback. Provide 2 strengths + 2 growth points; give one concrete refinement.",
 }
 
-def compose_silent_nudge(action_key: Optional[str]) -> Optional[str]:
-    if not action_key:
-        return None
-    return ACTION_PROMPTS.get(action_key)
-
-
-# --- Generation Configuration ---------------------------------------------
-def build_generation_config(enable_search: bool, enable_code_exec: bool) -> types.GenerateContentConfig:
-    tools = build_tools(enable_search, enable_code_exec)
-    return types.GenerateContentConfig(
-        system_instruction=system_instructions,
-        tools=tools if tools else None,
-        thinking_config=types.ThinkingConfig(thinking_budget=-1),  # dynamic thinking
-        temperature=0.9,
-        max_output_tokens=2048,
-    )
-
-
-# --- URL Context -----------------------------------------------------------
-def prepare_url_context(url_text: str) -> List[str]:
+def compose_turn(user_text: str, action_key: Optional[str], filenames: List[str]) -> List[types.Content]:
     """
-    Accepts a multi-line string of URLs. Returns a list of cleaned URL strings.
-    Gemini URL context feature can accept URLs to fetch page content.
+    Build the full contents list for generate_content using chat history
+    plus a single new turn that may include a silent action nudge and file names.
+    This avoids fragile file-data APIs and keeps first run reliable.
     """
-    urls = []
-    for line in (url_text or "").splitlines():
-        u = line.strip()
-        if u and ("http://" in u or "https://" in u):
-            urls.append(u)
-    return urls
-
-
-# --- Chat Call -------------------------------------------------------------
-def call_model(
-    user_text: str,
-    action_key: Optional[str] = None,
-    attach_files: Optional[List[Dict[str, str]]] = None,
-    url_text: str = "",
-) -> str:
-    """
-    Compose contents from chat history + optional silent nudge + user text.
-    Attach files/URL context if provided. Return assistant text.
-    """
-    # Build parts list for this turn
-    parts: List[types.Part] = []
-
-    # 1) Optional silent action prompt
-    nudge = compose_silent_nudge(action_key)
-    if nudge:
-        parts.append(types.Part(text=f"[INTERNAL_COACHING]\n{nudge}"))
-
-    # 2) URL context (OPTIONAL)
-    urls = prepare_url_context(url_text)
-    for u in urls:
-        try:
-            parts.append(types.Part(inline_data=types.Blob(mime_type="text/url", data=u.encode("utf-8"))))
-        except Exception:
-            # Gracefully fall back to plain text
-            parts.append(types.Part(text=f"URL_CONTEXT: {u}"))
-
-    # 3) Files references (OPTIONAL)
-    if attach_files:
-        for f in attach_files:
-            # The modern SDK accepts file references by name (id) in parts:
-            # types.Part(file_data=types.FileData(file_uri=f["id"]))  # in some SDKs
-            # Use generic file_data; fallback to text mention if needed
-            try:
-                parts.append(types.Part(file_data=types.FileData(file_uri=f["id"])))
-            except Exception:
-                parts.append(types.Part(text=f"[FILE_REF name={f['name']} id={f['id']}]"))
-
-    # 4) The visible user text
-    if user_text.strip():
-        parts.append(types.Part(text=user_text.strip()))
-
-    # 5) Historical context
-    history_parts: List[types.Content] = []
+    # Convert history
+    contents: List[types.Content] = []
     for msg in st.session_state.chat_history:
-        role = msg.get("role")
-        content = msg.get("content", "")
-        if not content:
-            continue
-        if role == "user":
-            history_parts.append(types.Content(role="user", parts=[types.Part(text=content)]))
-        elif role == "assistant":
-            history_parts.append(types.Content(role="model", parts=[types.Part(text=content)]))
-        elif role == "system":
-            # We normally keep system outside the history, but include if present
-            history_parts.append(types.Content(role="system", parts=[types.Part(text=content)]))
+        role = "user" if msg["role"] == "user" else "model"
+        contents.append(types.Content(role=role, parts=[types.Part(text=msg["content"])]))
 
-    # 6) Build config
-    gen_cfg = build_generation_config(
-        enable_search=st.session_state.use_search,
-        enable_code_exec=st.session_state.use_code_exec,
-    )
+    # Compose the current user turn
+    current_parts = []
+    if action_key and action_key in ACTION_PROMPTS:
+        current_parts.append(types.Part(text=f"[INTERNAL_COACHING]\n{ACTION_PROMPTS[action_key]}"))
+    if filenames:
+        current_parts.append(types.Part(text=f"[FILES]\nAttached: {', '.join(filenames[:10])}"))
+    if user_text.strip():
+        current_parts.append(types.Part(text=user_text.strip()))
 
-    # 7) Make the call
-    try:
-        resp = client.models.generate_content(
-            model="gemini-flash-lite-latest",
-            contents=history_parts + [types.Content(parts=parts)],
-            config=gen_cfg,
-        )
-        return getattr(resp, "text", "") or "(No text response)"
-    except Exception as e:
-        st.error(f"Model call failed: {e}")
-        return "I hit a problem reaching the model. Please try again."
+    contents.append(types.Content(parts=current_parts))
+    return contents
 
 
-# --- UI: CSS (mirrors your palette & layout) ------------------------------
+# --- CSS (faithful to your palette) ---------------------------------------
 CSS = """
 <style>
 :root{
@@ -227,7 +118,7 @@ CSS = """
   --border:#B5DFB0; --accent:#10b981; --surface-alt:#C8E6C9;
 }
 html, body, .stApp { background: var(--bg); }
-.block-container { padding-top: 1rem; padding-bottom: 1rem; }
+.block-container { padding-top: 0.75rem; padding-bottom: 0.75rem; }
 
 /* Header */
 .header-box{
@@ -253,14 +144,10 @@ html, body, .stApp { background: var(--bg); }
 }
 .chat-head{
   border-bottom:1px solid var(--border);
-  padding:10px 14px;
-  font-weight:600;
-  color:#1e293b;
+  padding:10px 14px; font-weight:600; color:#1e293b;
 }
 .chat-scroll{
-  flex:1 1 auto;
-  overflow-y:auto;
-  padding: 14px;
+  flex:1 1 auto; overflow-y:auto; padding: 14px;
   background: linear-gradient(to bottom, #E8F5E9, #E8F5E9);
 }
 .bubble{
@@ -271,11 +158,7 @@ html, body, .stApp { background: var(--bg); }
 .assistant .bubble{ background: var(--surface-alt); border:1px solid var(--border); color:#0f172a; border-bottom-left-radius:6px; }
 .meta{ font-size: 12px; color:#94a3b8; margin-top:-4px; margin-bottom: 6px; }
 
-.chat-input-wrap{
-  border-top:1px solid var(--border); padding:8px 10px; background:#fff;
-}
-.small-btn{ font-size: 12px; padding:6px 10px; border-radius:8px; border:1px solid var(--border); background:#ffffff; }
-.small-btn:hover{ background:#eef6ef; border-color: var(--brand); }
+.chat-input-wrap{ border-top:1px solid var(--border); padding:10px; background:#fff; }
 
 /* Cards */
 .side-card{
@@ -284,6 +167,7 @@ html, body, .stApp { background: var(--bg); }
   border-radius: 16px;
   padding: 12px;
   box-shadow: 0 4px 12px rgba(0,0,0,.06);
+  margin-bottom: 12px;
 }
 .card-title{
   font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em;
@@ -298,12 +182,7 @@ html, body, .stApp { background: var(--bg); }
 .file-pill{ font-size:12px; padding:6px 8px; border-radius:10px; border:1px solid var(--border); margin:2px; display:inline-flex; gap:6px; }
 
 /* Chips bar */
-.chips{ display:flex; flex-wrap:wrap; gap:6px; margin:6px 0 2px 0; }
-.chip{ font-size:12px; padding:6px 10px; border:1px solid var(--border); border-radius:999px; background:#f7fff9; }
-.chip:hover{ background:#e9f7ee; }
-
-/* Footer status */
-.status-pill{ display:inline-flex; gap:8px; align-items:center; font-size:12px; padding:6px 10px; border-radius:999px; border:1px solid var(--border); background:#fff; }
+.chips{ display:flex; flex-wrap:wrap; gap:6px; margin:6px 0; }
 </style>
 """
 st.markdown(CSS, unsafe_allow_html=True)
@@ -318,110 +197,272 @@ with st.container():
     )
 
 
-# --- Layout: 3 columns (Left actions / Center chat / Right panels) --------
+# --- Layout ---------------------------------------------------------------
 left, center, right = st.columns([0.9, 1.8, 0.9], gap="medium")
 
 
-# ================== LEFT: Learning Actions & Uploads ======================
+# ================= LEFT: Actions + Timer + Uploads ========================
 with left:
     st.markdown('<div class="side-card">', unsafe_allow_html=True)
     st.markdown('<div class="card-title">Learning Actions</div>', unsafe_allow_html=True)
 
-    act_cols = st.columns(2)
-    with act_cols[0]:
-        if st.button("🎯 Goals", use_container_width=True, key="btn_goals"):
-            st.session_state._pending_action = "goal"
-            st.toast("Goals action armed—type or send to apply.", icon="🎯")
-            st.session_state.path_step = 1
-    with act_cols[1]:
-        if st.button("📊 Task Analysis", use_container_width=True, key="btn_task"):
-            st.session_state._pending_action = "taskanalysis"
-            st.toast("Task Analysis action armed—type or send to apply.", icon="📊")
-            st.session_state.path_step = 2
-
-    act_cols2 = st.columns(2)
-    with act_cols2[0]:
-        if st.button("💡 Strategies", use_container_width=True, key="btn_strat"):
-            st.session_state._pending_action = "learning strategies"
-            st.toast("Strategies action armed—type or send to apply.", icon="💡")
-            st.session_state.path_step = 3
-    with act_cols2[1]:
-        if st.button("⏱️ Time", use_container_width=True, key="btn_time"):
-            st.session_state._pending_action = "time management"
-            st.toast("Time Management action armed—type or send to apply.", icon="⏱️")
-            st.session_state.path_step = 4
-
-    act_cols3 = st.columns(2)
-    with act_cols3[0]:
-        if st.button("📚 Resources", use_container_width=True, key="btn_res"):
-            st.session_state._pending_action = "resources"
-            st.toast("Resources action armed—type or send to apply.", icon="📚")
-            st.session_state.path_step = 5
-    with act_cols3[1]:
-        if st.button("🤔 Reflect", use_container_width=True, key="btn_ref"):
-            st.session_state._pending_action = "reflection"
-            st.toast("Reflection action armed—type or send to apply.", icon="📝")
-
-    if st.button("💬 Feedback", use_container_width=True, key="btn_feedback"):
-        st.session_state._pending_action = "feedback"
-        st.toast("Feedback action armed—type or send to apply.", icon="💬")
+    c1, c2 = st.columns(2)
+    if c1.button("🎯 Goals", use_container_width=True): st.session_state._pending_action, st.session_state.path_step = "goal", 1
+    if c2.button("📊 Task Analysis", use_container_width=True): st.session_state._pending_action, st.session_state.path_step = "taskanalysis", 2
+    c3, c4 = st.columns(2)
+    if c3.button("💡 Strategies", use_container_width=True): st.session_state._pending_action, st.session_state.path_step = "learning strategies", 3
+    if c4.button("⏱️ Time", use_container_width=True): st.session_state._pending_action, st.session_state.path_step = "time management", 4
+    c5, c6 = st.columns(2)
+    if c5.button("📚 Resources", use_container_width=True): st.session_state._pending_action, st.session_state.path_step = "resources", 5
+    if c6.button("🤔 Reflect", use_container_width=True): st.session_state._pending_action = "reflection"
+    if st.button("💬 Feedback", use_container_width=True): st.session_state._pending_action = "feedback"
 
     st.divider()
-
-    # Process Monitor (Pomodoro-lite)
     st.markdown('<div class="card-title">Process Monitor</div>', unsafe_allow_html=True)
-    timer_cols = st.columns([1, 1, 1])
-    with timer_cols[0]:
-        if st.button("25m", key="t25", use_container_width=True):
-            st.session_state.timer_minutes = 25
-    with timer_cols[1]:
-        if st.button("15m", key="t15", use_container_width=True):
-            st.session_state.timer_minutes = 15
-    with timer_cols[2]:
-        if st.button("5m", key="t05", use_container_width=True):
-            st.session_state.timer_minutes = 5
 
-    # Display timer
-    def _format_mmss(seconds: int) -> str:
-        m = seconds // 60
-        s = seconds % 60
+    # timer presets
+    p1, p2, p3 = st.columns(3)
+    if p1.button("25m", use_container_width=True): st.session_state.timer_minutes = 25
+    if p2.button("15m", use_container_width=True): st.session_state.timer_minutes = 15
+    if p3.button("5m", use_container_width=True): st.session_state.timer_minutes = 5
+
+    # timer display (step-updated)
+    def fmt(sec: int) -> str:
+        m, s = sec // 60, sec % 60
         return f"{m:02d}:{s:02d}"
 
-    # Compute remaining (non-realtime; updates when user interacts)
-    elapsed = 0
     if st.session_state.timer_running:
-        elapsed = int(time.time() - st.session_state.timer_start_ts)
-        st.session_state.timer_elapsed = elapsed
+        st.session_state.timer_elapsed = int(time.time() - st.session_state.timer_start_ts)
 
-    target = st.session_state.timer_minutes * 60
-    remain = max(0, target - st.session_state.timer_elapsed)
+    total = st.session_state.timer_minutes * 60
+    remain = max(0, total - st.session_state.timer_elapsed)
 
     st.caption("Timer")
-    st.subheader(_format_mmss(remain))
+    st.subheader(fmt(remain))
 
-    pm_cols = st.columns(3)
-    with pm_cols[0]:
-        if st.button("Start", key="tstart", use_container_width=True, disabled=st.session_state.timer_running):
-            st.session_state.timer_running = True
-            st.session_state.timer_start_ts = time.time() - st.session_state.timer_elapsed
-            st.toast("Timer started.", icon="⏱️")
-    with pm_cols[1]:
-        if st.button("Pause", key="tpause", use_container_width=True, disabled=not st.session_state.timer_running):
-            st.session_state.timer_running = False
-            st.session_state.timer_elapsed = int(time.time() - st.session_state.timer_start_ts)
-            st.toast("Timer paused.", icon="⏸️")
-    with pm_cols[2]:
-        if st.button("Reset", key="treset", use_container_width=True):
-            st.session_state.timer_running = False
-            st.session_state.timer_elapsed = 0
-            st.toast("Timer reset.", icon="🔄")
+    t1, t2, t3 = st.columns(3)
+    if t1.button("Start", use_container_width=True, disabled=st.session_state.timer_running):
+        st.session_state.timer_running = True
+        st.session_state.timer_start_ts = time.time() - st.session_state.timer_elapsed
+    if t2.button("Pause", use_container_width=True, disabled=not st.session_state.timer_running):
+        st.session_state.timer_running = False
+        st.session_state.timer_elapsed = int(time.time() - st.session_state.timer_start_ts)
+    if t3.button("Reset", use_container_width=True):
+        st.session_state.timer_running = False
+        st.session_state.timer_elapsed = 0
 
-    # Log a block when it hits zero (user-triggered check)
     if remain == 0 and st.session_state.timer_running:
         st.session_state.timer_running = False
         st.session_state.timer_elapsed = 0
         st.session_state.time_log.append(
             {"minutes": st.session_state.timer_minutes, "label": "Focused block", "ended_at": datetime.utcnow().isoformat()}
         )
+        st.session_state._pending_action = "reflection"
         st.success("Pomodoro complete! Logged a focused block.")
-        # small nudge to keep
+
+    if st.session_state.time_log:
+        st.caption("Today’s time log")
+        for item in reversed(st.session_state.time_log[-5:]):
+            st.markdown(f"- **{item['minutes']}m** · {item['label']} · {item['ended_at'].split('T')[0]}")
+
+    st.divider()
+    st.markdown('<div class="card-title">📎 Upload Materials</div>', unsafe_allow_html=True)
+
+    files = st.file_uploader(
+        "Drop or choose files (PDF/DOCX/TXT/Images)",
+        type=["pdf", "doc", "docx", "txt", "png", "jpg", "jpeg"],
+        accept_multiple_files=True,
+        label_visibility="collapsed"
+    )
+    if files:
+        for f in files:
+            # store only meta for now; keeps first-run bulletproof
+            pos = f.tell()
+            data = f.read()
+            f.seek(pos)
+            st.session_state.files.append({"name": f.name, "bytes": len(data), "mime": f.type or "application/octet-stream"})
+        st.success(f"Added {len(files)} file(s) to context (names shared with the model).")
+
+    if st.session_state.files:
+        st.caption("Attached (names only):")
+        st.markdown("".join([f"<span class='file-pill'>🗂️ {f['name']}</span>" for f in st.session_state.files[-10:]]), unsafe_allow_html=True)
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
+
+# ================= CENTER: Chat ===========================================
+with center:
+    # Top switches + URL context
+    top = st.container()
+    with top:
+        cA, cB, cC = st.columns([1, 1, 2])
+        st.session_state.ground_search = cA.checkbox("🔎 Search grounding", value=st.session_state.ground_search)
+        st.session_state.use_code_exec = cB.checkbox("🧮 Code execution", value=st.session_state.use_code_exec)
+        url_context = cC.text_input("Optional URL context (paste one per line or leave blank)", value="", placeholder="https://example.com/article …")
+
+    # Chat card
+    st.markdown('<div class="chat-card">', unsafe_allow_html=True)
+    st.markdown('<div class="chat-head">Chat with Sylvia</div>', unsafe_allow_html=True)
+
+    # Seed assistant greeting
+    if not st.session_state.chat_history:
+        st.session_state.chat_history.append({"role": "assistant", "content": "Hello! I’m Sylvia. What are you working on today?"})
+
+    # Scroll area
+    scroll = st.container()
+    with scroll:
+        st.markdown('<div class="chat-scroll">', unsafe_allow_html=True)
+        for msg in st.session_state.chat_history:
+            cls = "assistant" if msg["role"] == "assistant" else "user"
+            st.markdown(f"<div class='{cls}'><div class='bubble'>{msg['content']}</div></div>", unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    # Input area (kept inside the card)
+    with st.form("chat_form", clear_on_submit=True):
+        st.markdown('<div class="chat-input-wrap">', unsafe_allow_html=True)
+        user_text = st.text_area("Type your message…", height=90, label_visibility="collapsed")
+        submitted = st.form_submit_button("Send", type="primary", use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    # Handle send
+    if submitted and user_text.strip():
+        st.session_state.chat_history.append({"role": "user", "content": user_text})
+        assistant_text = "(Model unavailable) Please add GEMINI_API_KEY in Secrets and install requirements."
+
+        if client:
+            try:
+                # Build tools (optional) – we won't pass fragile objects; model still benefits from instruction
+                tools = []
+                if st.session_state.ground_search:
+                    tools.append(types.Tool(google_search=types.GoogleSearch()))
+                if st.session_state.use_code_exec:
+                    tools.append(types.Tool(code_execution=types.CodeExecution()))
+
+                # Compose contents (history + current turn)
+                contents = compose_turn(
+                    user_text=user_text,
+                    action_key=st.session_state._pending_action,
+                    filenames=[f["name"] for f in st.session_state.files],
+                )
+
+                # Generate
+                resp = client.models.generate_content(
+                    model="gemini-flash-lite-latest",
+                    contents=contents,
+                    config=types.GenerateContentConfig(
+                        system_instruction=SYSTEM_PROMPT,
+                        tools=tools if tools else None,
+                        temperature=0.9,
+                        max_output_tokens=2048,
+                    ),
+                )
+                assistant_text = getattr(resp, "text", "") or "(No text response)"
+            except Exception as e:
+                assistant_text = f"Model call failed: {e}"
+
+        st.session_state.chat_history.append({"role": "assistant", "content": assistant_text})
+        st.session_state.progress_pct = min(100, st.session_state.progress_pct + 5)
+        st.session_state._pending_action = None
+        st.rerun()
+
+    st.markdown('</div>', unsafe_allow_html=True)  # chat-card end
+
+
+# ================= RIGHT: Path / Progress / Sessions ======================
+with right:
+    # Learning Path
+    st.markdown('<div class="side-card">', unsafe_allow_html=True)
+    st.markdown('<div class="card-title">📍 Learning Path</div>', unsafe_allow_html=True)
+    steps = ["Goals", "Task Analysis", "Strategies", "Time Plan", "Resources"]
+    for i, name in enumerate(steps, start=1):
+        badge = "✓" if st.session_state.path_step > i else ("●" if st.session_state.path_step == i else str(i))
+        st.markdown(f"- **{badge} {name}**")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # Progress
+    st.markdown('<div class="side-card">', unsafe_allow_html=True)
+    st.markdown('<div class="card-title">🎯 Progress</div>', unsafe_allow_html=True)
+    st.write(f"Task Completion: **{st.session_state.progress_pct}%**")
+    st.markdown(
+        f'<div class="progress-outer"><div class="progress-inner" style="width:{st.session_state.progress_pct}%;"></div></div>',
+        unsafe_allow_html=True
+    )
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # Sessions
+    st.markdown('<div class="side-card">', unsafe_allow_html=True)
+    st.markdown('<div class="card-title">📁 Session</div>', unsafe_allow_html=True)
+    os.makedirs(st.session_state.sessions_dir, exist_ok=True)
+    s1, s2 = st.columns(2)
+    if s1.button("💾 Save Session", use_container_width=True):
+        payload = {
+            "ts": datetime.utcnow().isoformat(),
+            "chat_history": st.session_state.chat_history,
+            "files": st.session_state.files,
+            "progress_pct": st.session_state.progress_pct,
+            "path_step": st.session_state.path_step,
+            "time_log": st.session_state.time_log,
+        }
+        fname = os.path.join(st.session_state.sessions_dir, f"session_{int(time.time())}.json")
+        with open(fname, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+        st.success(f"Session saved: {os.path.basename(fname)}")
+    if s2.button("🗑️ Clear", use_container_width=True):
+        st.session_state.chat_history = []
+        st.session_state.files = []
+        st.session_state.progress_pct = 0
+        st.session_state.path_step = 1
+        st.session_state.time_log = []
+        st.success("Cleared current session.")
+
+    e1, e2 = st.columns(2)
+    export_payload = json.dumps(
+        {
+            "chat_history": st.session_state.chat_history,
+            "files": st.session_state.files,
+            "progress_pct": st.session_state.progress_pct,
+            "path_step": st.session_state.path_step,
+            "time_log": st.session_state.time_log,
+        }, ensure_ascii=False, indent=2
+    ).encode("utf-8")
+    e1.download_button("📤 Export JSON", export_payload, file_name="sylvia_session.json", mime="application/json", use_container_width=True)
+    if e2.button("➕ New Session", use_container_width=True):
+        st.session_state.chat_history = []
+        st.session_state.progress_pct = 0
+        st.session_state.path_step = 1
+        st.session_state.time_log = []
+        st.toast("Started a new session.", icon="✨")
+
+    # Saved sessions list
+    saved = sorted(
+        (fn for fn in os.listdir(st.session_state.sessions_dir) if fn.endswith(".json")),
+        key=lambda x: os.path.getmtime(os.path.join(st.session_state.sessions_dir, x)),
+        reverse=True
+    )[:5]
+    if saved:
+        st.markdown('<div class="card-title">📜 Saved</div>', unsafe_allow_html=True)
+        for fn in saved:
+            p = os.path.join(st.session_state.sessions_dir, fn)
+            cL, cR = st.columns([0.65, 0.35])
+            cL.markdown(f"- {fn}")
+            if cR.button("Load", key=f"load_{fn}"):
+                with open(p, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                st.session_state.chat_history = data.get("chat_history", [])
+                st.session_state.files = data.get("files", [])
+                st.session_state.progress_pct = data.get("progress_pct", 0)
+                st.session_state.path_step = data.get("path_step", 1)
+                st.session_state.time_log = data.get("time_log", [])
+                st.success(f"Loaded {fn}")
+                st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
+
+
+# --- Footer status ---------------------------------------------------------
+with st.container():
+    status = []
+    status.append(("Model", "gemini-flash-lite-latest"))
+    status.append(("Search", "ON" if st.session_state.ground_search else "OFF"))
+    status.append(("CodeExec", "ON" if st.session_state.use_code_exec else "OFF"))
+    status.append(("Files", f"{len(st.session_state.files)}"))
+    st.caption(" | ".join([f"**{k}**: {v}" for k, v in status]))
