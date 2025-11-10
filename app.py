@@ -148,7 +148,6 @@ def compose_turn(user_text: str, action_key: Optional[str], filenames: List[str]
 
 
 # --- CSS (faithful to your palette) ---------------------------------------
-CSS = """
 <style>
 :root{
   --bg:#E8F5E9; --ink:#0D2B12; --muted:#5f7466; --brand:#1B5E20;
