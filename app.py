@@ -189,9 +189,12 @@ st.markdown(CSS, unsafe_allow_html=True)
 
 
 # --- Header ---------------------------------------------------------------
-# Hidden developer controls (removed from UI)
-st.session_state.ground_search = False
-st.session_state.use_code_exec = False
+# Top switches + URL context
+top = st.container()
+with top:
+    cA, cB, cC = st.columns([1, 1, 2])
+    st.session_state.ground_search = False
+    st.session_state.use_code_exec = False
 url_context = ""  # intentionally unused/hidden
 
 
