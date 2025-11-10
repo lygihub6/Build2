@@ -84,6 +84,9 @@ def init_session_state():
     
     if 'saved_sessions' not in st.session_state:
         st.session_state.saved_sessions = []
+    
+    if 'action_triggered' not in st.session_state:
+        st.session_state.action_triggered = None
 
 init_session_state()
 
@@ -176,8 +179,8 @@ def process_action(action_type, user_input=""):
     return action_prompts.get(action_type, user_input)
 
 # --- UI Components ---------------------------------------------------------
-def render_sidebar():
-    """Render the sidebar with tools and session management"""
+def render_left_sidebar():
+    """Render the left sidebar with tools and session management"""
     with st.sidebar:
         st.title("🎓 Learning Toolkit")
         
@@ -194,40 +197,40 @@ def render_sidebar():
         with col1:
             if st.button("🎯 Set Goals", use_container_width=True):
                 st.session_state.current_phase = "Goals"
-                return "goal"
+                st.session_state.action_triggered = "goal"
             
             if st.button("📋 Analyze Task", use_container_width=True):
                 st.session_state.current_phase = "Task Analysis"
-                return "taskanalysis"
+                st.session_state.action_triggered = "taskanalysis"
             
             if st.button("🧠 Plan Strategies", use_container_width=True):
                 st.session_state.current_phase = "Strategies"
-                return "strategies"
+                st.session_state.action_triggered = "strategies"
             
             if st.button("⏰ Time Planning", use_container_width=True):
                 st.session_state.current_phase = "Time Planning"
-                return "timemanagement"
+                st.session_state.action_triggered = "timemanagement"
             
             if st.button("📚 Find Resources", use_container_width=True):
                 st.session_state.current_phase = "Resources"
-                return "resources"
+                st.session_state.action_triggered = "resources"
         
         with col2:
             if st.button("⏱️ Log Time", use_container_width=True):
-                return "timelog"
+                st.session_state.action_triggered = "timelog"
             
             if st.button("🤔 Reflect", use_container_width=True):
                 st.session_state.current_phase = "Reflection"
-                return "reflection"
+                st.session_state.action_triggered = "reflection"
             
             if st.button("✅ Get Feedback", use_container_width=True):
                 st.session_state.current_phase = "Feedback"
-                return "feedback"
+                st.session_state.action_triggered = "feedback"
             
             if st.button("💾 Save Session", use_container_width=True):
                 save_session()
                 st.success("Session saved!")
-                return "save"
+                st.session_state.action_triggered = "save"
             
             if st.button("🗑️ Clear Session", use_container_width=True):
                 clear_session()
@@ -273,92 +276,25 @@ def render_sidebar():
                     st.session_state.learning_goals = session.get('goals', [])
                     st.session_state.task_info = session.get('task', "")
                     st.rerun()
-    
-    return None
+
 
 def render_chat_interface():
-    """Render the main chat interface"""
+    """Render the main chat interface in the center column"""
     st.title("📚 Sylvia - Your Learning Facilitator")
     st.markdown("*Hi! I'm Sylvia, here to help you develop effective self-regulated learning skills. Let's work on your learning goals together!*")
     
     # Display chat messages
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-    
-    # Chat input
-    if prompt := st.chat_input("Describe your learning task or ask for guidance..."):
-        # Add user message
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        
-        with st.chat_message("user"):
-            st.markdown(prompt)
-        
-        # Generate response
-        with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
-                try:
-                    # Build conversation history
-                    conversation = []
-                    for msg in st.session_state.messages[-10:]:  # Last 10 messages for context
-                        role = "user" if msg["role"] == "user" else "model"
-                        conversation.append(types.Content(
-                            role=role,
-                            parts=[types.Part(text=msg["content"])]
-                        ))
-                    
-                    # Generate response
-                    response = client.models.generate_content(
-                        model="gemini-2.0-flash-lite",
-                        contents=conversation,
-                        config=generation_cfg,
-                    )
-                    
-                    assistant_response = response.text or "I'm here to help. Could you tell me more about your learning task?"
-                    st.markdown(assistant_response)
-                    st.session_state.messages.append({"role": "assistant", "content": assistant_response})
-                    
-                except Exception as e:
-                    error_msg = f"I encountered an error: {str(e)}. Please try again."
-                    st.error(error_msg)
-                    st.session_state.messages.append({"role": "assistant", "content": error_msg})
-
-def render_learning_summary():
-    """Render a summary of current learning session"""
-    if st.session_state.learning_goals or st.session_state.task_info:
-        with st.expander("📝 Session Summary", expanded=True):
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.markdown("**🎯 Learning Goals:**")
-                if st.session_state.learning_goals:
-                    for goal in st.session_state.learning_goals:
-                        st.write(f"• {goal}")
-                else:
-                    st.write("*No goals set yet*")
-                
-                st.markdown("**📋 Task:**")
-                st.write(st.session_state.task_info or "*No task defined yet*")
-            
-            with col2:
-                st.markdown("**🧠 Strategies:**")
-                if st.session_state.strategies:
-                    for strategy in st.session_state.strategies:
-                        st.write(f"• {strategy}")
-                else:
-                    st.write("*No strategies planned yet*")
-                
-                st.markdown("**⏰ Time Plan:**")
-                st.write(st.session_state.time_plan or "*No time plan set*")
-
-# --- Main App Logic --------------------------------------------------------
-def main():
-    """Main application logic"""
-    # Render sidebar and get action if any
-    action = render_sidebar()
+    chat_container = st.container()
+    with chat_container:
+        for message in st.session_state.messages:
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
     
     # Process action if triggered
-    if action:
+    if st.session_state.action_triggered:
+        action = st.session_state.action_triggered
+        st.session_state.action_triggered = None
+        
         action_prompt = process_action(action, "Please guide me with " + action)
         
         # Add action message to chat
@@ -382,14 +318,113 @@ def main():
         except Exception as e:
             st.error(f"Error processing action: {str(e)}")
     
-    # Render main chat interface
-    col1, col2 = st.columns([3, 1])
+    # Chat input
+    if prompt := st.chat_input("Describe your learning task or ask for guidance..."):
+        # Add user message
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        
+        # Generate response
+        with st.spinner("Sylvia is thinking..."):
+            try:
+                # Build conversation history
+                conversation = []
+                for msg in st.session_state.messages[-10:]:  # Last 10 messages for context
+                    role = "user" if msg["role"] == "user" else "model"
+                    conversation.append(types.Content(
+                        role=role,
+                        parts=[types.Part(text=msg["content"])]
+                    ))
+                
+                # Generate response
+                response = client.models.generate_content(
+                    model="gemini-2.0-flash-lite",
+                    contents=conversation,
+                    config=generation_cfg,
+                )
+                
+                assistant_response = response.text or "I'm here to help. Could you tell me more about your learning task?"
+                st.session_state.messages.append({"role": "assistant", "content": assistant_response})
+                st.rerun()
+                
+            except Exception as e:
+                error_msg = f"I encountered an error: {str(e)}. Please try again."
+                st.error(error_msg)
+                st.session_state.messages.append({"role": "assistant", "content": error_msg})
+                st.rerun()
+
+def render_right_sidebar():
+    """Render the right sidebar with learning summary"""
+    st.markdown("### 📝 Session Summary")
     
+    st.markdown("**🎯 Learning Goals:**")
+    if st.session_state.learning_goals:
+        for i, goal in enumerate(st.session_state.learning_goals, 1):
+            st.write(f"{i}. {goal}")
+    else:
+        st.write("*No goals set yet*")
+    
+    st.markdown("---")
+    
+    st.markdown("**📋 Task:**")
+    if st.session_state.task_info:
+        st.write(st.session_state.task_info)
+    else:
+        st.write("*No task defined yet*")
+    
+    st.markdown("---")
+    
+    st.markdown("**🧠 Strategies:**")
+    if st.session_state.strategies:
+        for i, strategy in enumerate(st.session_state.strategies, 1):
+            st.write(f"{i}. {strategy}")
+    else:
+        st.write("*No strategies planned yet*")
+    
+    st.markdown("---")
+    
+    st.markdown("**⏰ Time Plan:**")
+    if st.session_state.time_plan:
+        st.write(st.session_state.time_plan)
+    else:
+        st.write("*No time plan set*")
+    
+    st.markdown("---")
+    
+    # Session duration
+    if st.session_state.session_start:
+        duration = datetime.now() - st.session_state.session_start
+        st.markdown("**📊 Session Duration:**")
+        hours, remainder = divmod(duration.seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        st.write(f"{hours:02d}:{minutes:02d}:{seconds:02d}")
+    
+    # Recent reflections
+    if st.session_state.reflections:
+        st.markdown("---")
+        st.markdown("**🤔 Recent Reflections:**")
+        for reflection in st.session_state.reflections[-2:]:
+            st.info(reflection)
+
+# --- Main App Logic --------------------------------------------------------
+def main():
+    """Main application logic"""
+    # Render left sidebar
+    render_left_sidebar()
+    
+    # Create three columns for main layout
+    col1, col2, col3 = st.columns([1, 3, 1])
+    
+    # Left column is empty (sidebar already rendered)
     with col1:
+        pass
+    
+    # Center column - main chat interface
+    with col2:
         render_chat_interface()
     
-    with col2:
-        render_learning_summary()
+    # Right column - session summary
+    with col3:
+        render_right_sidebar()
 
 # --- Run App ---------------------------------------------------------------
 if __name__ == "__main__":
