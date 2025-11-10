@@ -170,10 +170,9 @@ html, body, .stApp { background: var(--bg); }
 .header-title { font-size: 28px; font-weight: 800; color: var(--brand); }
 .header-sub{ font-size: 13px; color:#64748b; }
 
-# --- Chat Card styles (keep this as ONE st.markdown call) ------------------
-st.markdown(
-    """
-    <style>
+# ---- Chat card CSS (SAFE: one call, properly closed) ----------------------
+def inject_chat_css():
+    st.markdown("""<style>
     .chat-card{
       background:#E8F5E9;
       border:1px solid #d4eed8;
@@ -190,8 +189,8 @@ st.markdown(
     }
     .chat-body{
       padding:14px 16px;
-      height:420px;
-      overflow-y:auto;
+      height:420px;              /* adjust as needed */
+      overflow-y:auto;           /* scroll messages */
     }
     .chat-input{
       border-top:1px solid #d4eed8;
@@ -205,61 +204,36 @@ st.markdown(
       padding:10px 14px;
       border-radius:10px;
     }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+    </style>""", unsafe_allow_html=True)
+
+inject_chat_css()
+
+# ---- Chat card markup (header + messages + input are INSIDE one card) ----
 st.markdown("<div class='chat-card'>", unsafe_allow_html=True)
 st.markdown("<div class='chat-header'>Chat with Sylvia</div>", unsafe_allow_html=True)
+
 st.markdown("<div class='chat-body'>", unsafe_allow_html=True)
-# ... render messages ...
-st.markdown("</div>", unsafe_allow_html=True)  # close chat-body
+for msg in st.session_state.get("chat_history", []):
+    st.markdown(msg, unsafe_allow_html=True)
+st.markdown("</div>", unsafe_allow_html=True)  # close .chat-body
+
 st.markdown("<div class='chat-input'>", unsafe_allow_html=True)
-user_text = st.text_area("", key="user_text", label_visibility="collapsed", height=120, placeholder="Type your message…")
-st.markdown("</div>", unsafe_allow_html=True)
+user_text = st.text_area("", key="user_text", label_visibility="collapsed",
+                         height=120, placeholder="Type your message…")
+st.markdown("</div>", unsafe_allow_html=True)  # close .chat-input
+
 st.markdown("<div class='chat-send'>", unsafe_allow_html=True)
 send_clicked = st.button("Send")
-st.markdown("</div></div>", unsafe_allow_html=True)  # close chat-card
+st.markdown("</div></div>", unsafe_allow_html=True)  # close .chat-card
 
-# --- Chat Card markup ------------------------------------------------------
-chat_card = st.container()
-with chat_card:
-    st.markdown("<div class='chat-card'>", unsafe_allow_html=True)
-
-    # Header lives INSIDE the card
-    st.markdown("<div class='chat-header'>Chat with Sylvia</div>", unsafe_allow_html=True)
-
-    # Messages area (scrollable)
-    st.markdown("<div class='chat-body'>", unsafe_allow_html=True)
-    for message in st.session_state.get("chat_history", []):
-        # message should already be HTML or simple text; render safely as needed
-        st.markdown(message, unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)  # close .chat-body
-
-    # Input + send button inside the same card
-    st.markdown("<div class='chat-input'>", unsafe_allow_html=True)
-    user_text = st.text_area(
-        label="",
-        key="user_text",
-        label_visibility="collapsed",
-        placeholder="Type your message…",
-        height=120
-    )
-    st.markdown("</div>", unsafe_allow_html=True)  # close .chat-input
-
-    # Send button row (also inside the card)
-    st.markdown("<div class='chat-send'>", unsafe_allow_html=True)
-    send_clicked = st.button("Send")
-    st.markdown("</div></div>", unsafe_allow_html=True)  # close .chat-card
-
-# --- Handle send -----------------------------------------------------------
+# ---- Send handler ---------------------------------------------------------
 if send_clicked and user_text.strip():
     st.session_state.setdefault("chat_history", []).append(
         f"<div class='msg user'>{user_text.strip()}</div>"
     )
-    # Clear the textarea after sending
     st.session_state["user_text"] = ""
     st.experimental_rerun()
+
 
 /* Cards */
 .side-card{
