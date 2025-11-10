@@ -27,6 +27,7 @@ Self-regulated learning (SRL) is defined as individuals’ self-generated cognit
   {"name": "goal", "description": "Assist the user in defining and setting mastery learning goals for their academic tasks."},
   {"name": "taskanalysis", "description": "Assist the user in identifying their prior knowledge related to their current tasks and understand the requirements of their academic task."},
   {"name": "learning strategies", "description": "Generate and suggest effective learning strategies tailored to the user's goals, task and learning style."},
+  {"name": "time management", "description": "Provide advice and strategies for effective time management in learning."},
   {"name": "timelog", "description": "Log time-on-task and plan focused work blocks (e.g., Pomodoro)."},
   {"name": "resources", "description": "Identify and suggest relevant learning resources to support the user's task."},
   {"name": "reflection", "description": "Prompt the user to reflect on their learning process and outcomes: goals met, time used, obstacles, strategies tried; emotion, effort."},
