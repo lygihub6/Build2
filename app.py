@@ -23,6 +23,9 @@ st.set_page_config(
     page_title="Sylvia – Learning Facilitator",
     page_icon="🎓",
     layout="wide",
+)
+
+
 
 # --- Secrets ---------------------------------------------------------------
 API_KEY = st.secrets.get("GEMINI_API_KEY", "")
