@@ -19,23 +19,10 @@ except Exception as _e:
 
 
 # --- Page Config -----------------------------------------------------------
+# Visible page title (renders on the page)
+st.title("🎓 Sylvia – Learning Facilitator")
+st.caption("Your personal learning facilitator: goals → task analysis → strategies → time plan → resources → reflect → feedback.")
 
-st.markdown(
-    """
-    <div style="
-      background:#fff;border:1px solid #B5DFB0;border-radius:16px;
-      padding:14px 18px;box-shadow:0 4px 12px rgba(0,0,0,.06);">
-      <div style="font-size:28px;font-weight:800;color:#1B5E20;">
-        🎓 Sylvia
-      </div>
-      <div style="font-size:13px;color:#64748b;">
-        Your personal learning facilitator: goals → task analysis → strategies →
-        time plan → resources → reflect → feedback.
-      </div>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
 
 st.set_page_config(
     page_title="Sylvia – Learning Facilitator",
