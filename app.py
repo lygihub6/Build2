@@ -19,6 +19,12 @@ except Exception as _e:
 
 
 # --- Page Config -----------------------------------------------------------
+# Hidden developer controls (removed from UI)
+st.session_state.ground_search = False
+st.session_state.use_code_exec = False
+url_context = ""  # intentionally unused/hidden
+
+
 # Visible page title (renders on the page)
 st.title("🎓 Sylvia – Learning Facilitator")
 st.caption("Your personal learning facilitator: goals → task analysis → strategies → time plan → resources → reflect → feedback.")
