@@ -170,41 +170,40 @@ html, body, .stApp { background: var(--bg); }
 .header-title { font-size: 28px; font-weight: 800; color: var(--brand); }
 .header-sub{ font-size: 13px; color:#64748b; }
 
-# ---- Chat card CSS (SAFE: one call, properly closed) ----------------------
-def inject_chat_css():
-    st.markdown("""<style>
-    .chat-card{
-      background:#E8F5E9;
-      border:1px solid #d4eed8;
-      border-radius:16px;
-      overflow:hidden;
-      box-shadow:0 1px 1px rgba(0,0,0,.03);
-    }
-    .chat-header{
-      background:#dff3e6;
-      padding:12px 16px;
-      font-weight:700;
-      color:#0D2B12;
-      border-bottom:1px solid #d4eed8;
-    }
-    .chat-body{
-      padding:14px 16px;
-      height:420px;              /* adjust as needed */
-      overflow-y:auto;           /* scroll messages */
-    }
-    .chat-input{
-      border-top:1px solid #d4eed8;
-      padding:12px 16px 16px 16px;
-    }
-    .chat-send .stButton>button{
-      width:100%;
-      background:#e95d55;
-      color:#fff;
-      border:none;
-      padding:10px 14px;
-      border-radius:10px;
-    }
-    </style>""", unsafe_allow_html=True)
+# Inject chat CSS safely — NOT an f-string, just plain triple quotes
+st.markdown("""<style>
+.chat-card{
+  background:#E8F5E9;
+  border:1px solid #d4eed8;
+  border-radius:16px;
+  overflow:hidden;
+  box-shadow:0 1px 1px rgba(0,0,0,.03);
+}
+.chat-header{
+  background:#dff3e6;
+  padding:12px 16px;
+  font-weight:700;
+  color:#0D2B12;
+  border-bottom:1px solid #d4eed8;
+}
+.chat-body{
+  padding:14px 16px;
+  height:420px;
+  overflow-y:auto;
+}
+.chat-input{
+  border-top:1px solid #d4eed8;
+  padding:12px 16px 16px 16px;
+}
+.chat-send .stButton>button{
+  width:100%;
+  background:#e95d55;
+  color:#fff;
+  border:none;
+  padding:10px 14px;
+  border-radius:10px;
+}
+</style>""", unsafe_allow_html=True)
 
 inject_chat_css()
 
