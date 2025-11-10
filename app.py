@@ -148,6 +148,7 @@ def compose_turn(user_text: str, action_key: Optional[str], filenames: List[str]
 
 
 # --- CSS (faithful to your palette) ---------------------------------------
+CHAT_CSS = '''
 <style>
 :root{
   --bg:#E8F5E9; --ink:#0D2B12; --muted:#5f7466; --brand:#1B5E20;
@@ -205,6 +206,7 @@ st.markdown("""<style>
 </style>""", unsafe_allow_html=True)
 
 inject_chat_css()
+'''
 
 # ---- Chat card markup (header + messages + input are INSIDE one card) ----
 st.markdown("<div class='chat-card'>", unsafe_allow_html=True)
