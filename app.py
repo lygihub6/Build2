@@ -234,7 +234,7 @@ if send_clicked and user_text.strip():
     st.session_state["user_text"] = ""
     st.experimental_rerun()
 
-
+'''
 /* Cards */
 .side-card{
   background: var(--card);
@@ -262,7 +262,7 @@ if send_clicked and user_text.strip():
 """
 st.markdown(CSS, unsafe_allow_html=True)
 
-
+'''
 # --- Header ---------------------------------------------------------------
 # Hidden developer controls (removed from UI)
 st.session_state.ground_search = False
