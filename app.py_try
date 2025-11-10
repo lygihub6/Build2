@@ -189,12 +189,10 @@ st.markdown(CSS, unsafe_allow_html=True)
 
 
 # --- Header ---------------------------------------------------------------
-with st.container():
-    st.markdown(
-        '<div class="header-box"><div class="header-title">🎓 Sylvia</div>'
-        '<div class="header-sub">Your personal learning facilitator: goals → task analysis → strategies → time plan → resources → reflect → feedback.</div></div>',
-        unsafe_allow_html=True
-    )
+# Hidden developer controls (removed from UI)
+st.session_state.ground_search = False
+st.session_state.use_code_exec = False
+url_context = ""  # intentionally unused/hidden
 
 
 # --- Layout ---------------------------------------------------------------
