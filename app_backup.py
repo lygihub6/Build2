@@ -1,314 +1,408 @@
-# CUSTOM BOT TEMPLATE
-# Copyright (c) 2025 Ronald A. Beghetto
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this code and associated files, to use, copy, modify, merge, publish,
-# distribute, sublicense, and/or sell copies of the code, and to permit
-# persons to whom the code is furnished to do so, subject to the
-# following conditions:
-#
-# An acknowledgement of the original template author must be made in any use,
-# in whole or part, of this code. The following notice shall be included:
-# "This code uses portions of code developed by Ronald A. Beghetto for a
-# course taught at Arizona State University."
-#
-# THE CODE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-
-# IMPORT Code Packages
-import streamlit as st  # <- streamlit
-from PIL import Image   # <- Python code to display images
+# --- Imports ---------------------------------------------------------------
+import os
 import io
+import json
 import time
-import mimetypes
+from datetime import datetime
+from typing import List, Dict, Any, Optional
 
-# --- Google GenAI Models import ---------------------------
-from google import genai
-from google.genai import types   # <--Allows for tool use, like Google Search
-# ----------------------------------------------------
+import streamlit as st                 # Streamlit
+from PIL import Image                  # Image display
 
-# Streamlit page setup <--this should be the first streamlit command after imports
-st.set_page_config(page_title="My Bot",  # <-- Change this also but always keep " " this will be the name on the browser tag
-                   layout="centered",    # <--- options are "centered", "wide", or nothing for default
-                   initial_sidebar_state="expanded")  # <-- will expand the sidebar automatically
-
-# Load and display a custom image for your bot
+# Google GenAI SDK (modern)
 try:
-    st.image(Image.open("Bot.png"),  # <-- make sure your image is called this or change it to be the same
-             caption="Bot Created by Yu (2025)",  # <-- change with your bot name and your own name
-             use_container_width=True)
-except Exception as e:
-    st.error(f"Error loading image: {e}")
+    from google import genai               # Google GenAI SDK
+    from google.genai import types         # configs & tools
+except Exception as _e:
+    genai = None
+    types = None
 
-# Bot Title
-st.markdown("<h1 style='text-align: center;'>Sylvia</h1>", unsafe_allow_html=True)
 
-# --- Helper -----------------------------------------
+# --- Page Config -----------------------------------------------------------
+st.set_page_config(
+    page_title="Sylvia – Learning Facilitator",
+    page_icon="🎓",
+    layout="wide",
+)
+
+
+# --- Secrets ---------------------------------------------------------------
+API_KEY = st.secrets.get("GEMINI_API_KEY", "")
+# Toggle to show advanced dev controls (defaults to False / hidden)
+SHOW_ADVANCED_CONTROLS = bool(st.secrets.get("SHOW_ADVANCED_CONTROLS", False))
+
+if not API_KEY:
+    st.warning("⚠️ 'GEMINI_API_KEY' is not set in st.secrets. Add it before deploying.")
+if genai:
+    client = genai.Client(api_key=API_KEY) if API_KEY else None
+else:
+    client = None
+
+
+# --- Identity / System Instructions ---------------------------------------
+@st.cache_data(show_spinner=False)
 def load_developer_prompt() -> str:
     try:
-        with open("identity.txt") as f:  # <-- Make sure your rules.text name matches this exactly
+        with open("identity.txt", "r", encoding="utf-8") as f:
             return f.read()
     except FileNotFoundError:
         st.warning("⚠️ 'identity.txt' not found. Using default prompt.")
-        return ("You are a helpful assistant. "
-                "Be friendly, engaging, and provide clear, concise responses.")
-
-def human_size(n: int) -> str:
-    for unit in ["B", "KB", "MB", "GB"]:
-        if n < 1024.0:
-            return f"{n:.1f} {unit}"
-        n /= 1024.0
-    return f"{n:.1f} TB"
-
-# --- Gemini configuration ---------------------------
-try:
-    # Activate Gemini GenAI model and access your API key in streamlit secrets
-    client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])  # <-- make sure you have your google API key (from Google AI Studio) and put it in streamlit secrets as GEMINI_API_KEY = "yourapikey" use " "
-
-    # System instructions
-    system_instructions = load_developer_prompt()
-
-    # Enable Google Search Tool
-    search_tool = types.Tool(google_search=types.GoogleSearch())  # <-- optional Google Search tool
-
-    # Generation configuration for every turn
-    generation_cfg = types.GenerateContentConfig(
-        system_instruction=system_instructions,
-        tools=[search_tool],
-        thinking_config=types.ThinkingConfig(thinking_budget=-1), # <--- set to dynamic thinking (model decides whether to use thinking based on context)
-        temperature=1.0,
-        max_output_tokens=2048,
-    )
-    
-except Exception as e:
-    st.error(
-        "Error initialising the Gemini client. "
-        "Check your `GEMINI_API_KEY` in Streamlit → Settings → Secrets."
-        f"Details: {e}"
-    )
-    st.stop()
-
-# Ensure chat history and files state stores exist
-st.session_state.setdefault("chat_history", [])
-# Each entry: {"name": str, "size": int, "mime": str, "file": google.genai.types.File}
-st.session_state.setdefault("uploaded_files", [])
-
-# --- Sidebar ----------------------------------------
-with st.sidebar:
-    st.title("⚙️ Controls")
-    st.markdown("### About: Briefly describe your bot here for users.")
-
-    # Model Selection Expander (testing different models)
-    with st.expander(":material/text_fields_alt: Model Selection", expanded=True):
-        selected_model = st.selectbox(
-            "Choose a model:",
-            options=[
-                "gemini-2.5-pro",
-                "gemini-2.5-flash",
-                "gemini-2.5-flash-lite"
-            ],
-            index=2,  # Default to gemini-2.5-flash-lite
-            label_visibility="visible",
-            help="Response Per Day Limits: Pro = 100, Flash = 250, Flash-lite = 1000)"
+        return (
+            "You are Sylvia, a supportive learning facilitator. "
+            "Use SRL framing: goals → task analysis → strategies → time plan → resources → reflect → feedback."
         )
-        st.caption(f"Selected: **{selected_model}**")
 
-        # Create chat now (post-selection), or re-create if the model changed
-        if "chat" not in st.session_state:
-            st.session_state.chat = client.chats.create(model=selected_model, config=generation_cfg)
-        elif getattr(st.session_state.chat, "model", None) != selected_model:
-            st.session_state.chat = client.chats.create(model=selected_model, config=generation_cfg)
+SYSTEM_PROMPT = load_developer_prompt()
 
-    # ---- Clear Chat button ----
-    if st.button("🧹 Clear chat", use_container_width=True, help="Clear messages and reset chat context"):
-        st.session_state.chat_history.clear()
-        # Recreate a fresh chat session (resets server-side history)
-        st.session_state.chat = client.chats.create(model=selected_model, config=generation_cfg)
-        st.toast("Chat cleared.")
+
+# --- Session State ---------------------------------------------------------
+def _init_state():
+    ss = st.session_state
+    ss.setdefault("chat_history", [])          # list of {role, content}
+    ss.setdefault("files", [])                 # list of {"name": str, "bytes": int, "mime": str}
+    ss.setdefault("ground_search", False)      # dev setting; hidden unless SHOW_ADVANCED_CONTROLS
+    ss.setdefault("use_code_exec", False)      # dev setting; hidden unless SHOW_ADVANCED_CONTROLS
+    ss.setdefault("url_context", "")           # dev setting; hidden unless SHOW_ADVANCED_CONTROLS
+    ss.setdefault("progress_pct", 0)
+    ss.setdefault("path_step", 1)
+    ss.setdefault("sessions_dir", "sessions")
+    # Timer
+    ss.setdefault("timer_minutes", 25)
+    ss.setdefault("timer_running", False)
+    ss.setdefault("timer_start_ts", 0.0)
+    ss.setdefault("timer_elapsed", 0)
+    ss.setdefault("time_log", [])
+    ss.setdefault("_pending_action", None)
+
+_init_state()
+
+
+# --- “Silent” Action Nudges -----------------------------------------------
+ACTION_PROMPTS = {
+    "goal": "SILENT_ACTION: User pressed Goals. Help define 1–2 mastery goals. Ask ONE short follow-up question.",
+    "taskanalysis": "SILENT_ACTION: User pressed Task Analysis. Identify prior knowledge, constraints, success criteria. Ask ONE clarifier.",
+    "learning strategies": "SILENT_ACTION: User pressed Learning Strategies. Suggest 3 concrete strategies tied to their goal.",
+    "time management": "SILENT_ACTION: User pressed Time Management. Offer a 25–5 Pomodoro micro-plan and a ≤2 min next step.",
+    "resources": "SILENT_ACTION: User pressed Resources. Suggest 3 targeted resource types. If search is enabled, cite likely sources.",
+    "reflection": "SILENT_ACTION: User pressed Reflect. Prompt reflection on goals met, obstacles, strategies tried, emotion, effort (≤4 bullets).",
+    "feedback": "SILENT_ACTION: User pressed Feedback. Provide 2 strengths + 2 growth points; give one concrete refinement.",
+}
+
+def compose_turn(user_text: str, action_key: Optional[str], filenames: List[str]) -> List['types.Content']:
+    contents: List['types.Content'] = []
+    for msg in st.session_state.chat_history:
+        role = "user" if msg["role"] == "user" else "model"
+        contents.append(types.Content(role=role, parts=[types.Part(text=msg["content"])]))
+
+    current_parts = []
+    if action_key and action_key in ACTION_PROMPTS:
+        current_parts.append(types.Part(text=f"[INTERNAL_COACHING]\n{ACTION_PROMPTS[action_key]}"))
+    if filenames:
+        current_parts.append(types.Part(text=f"[FILES]\nAttached: {', '.join(filenames[:10])}"))
+    if SHOW_ADVANCED_CONTROLS and st.session_state.get("url_context"):
+        # keep URL context only when controls are visible/used
+        current_parts.append(types.Part(text=f"[URLS]\n{st.session_state['url_context']}"))
+    if user_text.strip():
+        current_parts.append(types.Part(text=user_text.strip()))
+    contents.append(types.Content(parts=current_parts))
+    return contents
+
+
+# --- CSS -------------------------------------------------------------------
+CSS = """
+<style>
+:root{
+  --bg:#E8F5E9; --ink:#0D2B12; --muted:#5f7466; --brand:#1B5E20;
+  --brand-700:#164a19; --brand-800:#0f3712; --card:#ffffff; --ring:#0f9159;
+  --border:#B5DFB0; --accent:#10b981; --surface-alt:#C8E6C9;
+}
+html, body, .stApp { background: var(--bg); }
+.block-container { padding-top: 0.75rem; padding-bottom: 0.75rem; }
+.header-box{ background: var(--card); border:1px solid var(--border); border-radius:16px; padding:14px 18px; box-shadow:0 4px 12px rgba(0,0,0,.06); margin-bottom:8px;}
+.header-title{ font-size:28px; font-weight:800; color:var(--brand); }
+.header-sub{ font-size:13px; color:#64748b; }
+.chat-card{ background:var(--card); border:1px solid var(--border); border-radius:16px; height:70vh; display:flex; flex-direction:column; overflow:hidden; box-shadow:0 8px 24px rgba(0,0,0,.06);}
+.chat-head{ border-bottom:1px solid var(--border); padding:10px 14px; font-weight:600; color:#1e293b;}
+.chat-scroll{ flex:1 1 auto; overflow-y:auto; padding:14px; background: linear-gradient(to bottom, #E8F5E9, #E8F5E9); }
+.bubble{ max-width:65ch; padding:10px 14px; border-radius:14px; margin-bottom:10px; line-height:1.45; font-size:.96rem;}
+.user .bubble{ background:var(--brand); color:#fff; margin-left:auto; border-bottom-right-radius:6px;}
+.assistant .bubble{ background:var(--surface-alt); border:1px solid var(--border); color:#0f172a; border-bottom-left-radius:6px;}
+.chat-input-wrap{ border-top:1px solid var(--border); padding:10px; background:#fff; }
+.side-card{ background:var(--card); border:1px solid var(--border); border-radius:16px; padding:12px; box-shadow:0 4px 12px rgba(0,0,0,.06); margin-bottom:12px;}
+.card-title{ font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:.06em; color:#64748b; margin-bottom:8px;}
+.progress-outer{ width:100%; height:6px; background:#d7efdb; border-radius:4px; overflow:hidden;}
+.progress-inner{ height:6px; background: linear-gradient(90deg, var(--brand), #2E7D32); }
+.file-pill{ font-size:12px; padding:6px 8px; border-radius:10px; border:1px solid var(--border); margin:2px; display:inline-flex; gap:6px; }
+.hidden-bar{ padding:6px 10px; font-size:12px; color:#64748b; }
+</style>
+"""
+st.markdown(CSS, unsafe_allow_html=True)
+
+
+# --- Header ---------------------------------------------------------------
+with st.container():
+    st.markdown(
+        '<div class="header-box"><div class="header-title">🎓 Sylvia</div>'
+        '<div class="header-sub">Your personal learning facilitator: goals → task analysis → strategies → time plan → resources → reflect → feedback.</div></div>',
+        unsafe_allow_html=True
+    )
+
+
+# --- Layout ---------------------------------------------------------------
+left, center, right = st.columns([0.9, 1.8, 0.9], gap="medium")
+
+
+# ================= LEFT: Actions + Timer + Uploads ========================
+with left:
+    st.markdown('<div class="side-card">', unsafe_allow_html=True)
+    st.markdown('<div class="card-title">Learning Actions</div>', unsafe_allow_html=True)
+
+    c1, c2 = st.columns(2)
+    if c1.button("🎯 Goals", use_container_width=True): st.session_state._pending_action, st.session_state.path_step = "goal", 1
+    if c2.button("📊 Task Analysis", use_container_width=True): st.session_state._pending_action, st.session_state.path_step = "taskanalysis", 2
+    c3, c4 = st.columns(2)
+    if c3.button("💡 Strategies", use_container_width=True): st.session_state._pending_action, st.session_state.path_step = "learning strategies", 3
+    if c4.button("⏱️ Time", use_container_width=True): st.session_state._pending_action, st.session_state.path_step = "time management", 4
+    c5, c6 = st.columns(2)
+    if c5.button("📚 Resources", use_container_width=True): st.session_state._pending_action, st.session_state.path_step = "resources", 5
+    if c6.button("🤔 Reflect", use_container_width=True): st.session_state._pending_action = "reflection"
+    if st.button("💬 Feedback", use_container_width=True): st.session_state._pending_action = "feedback"
+
+    st.divider()
+    st.markdown('<div class="card-title">Process Monitor</div>', unsafe_allow_html=True)
+
+    p1, p2, p3 = st.columns(3)
+    if p1.button("25m", use_container_width=True): st.session_state.timer_minutes = 25
+    if p2.button("15m", use_container_width=True): st.session_state.timer_minutes = 15
+    if p3.button("5m", use_container_width=True): st.session_state.timer_minutes = 5
+
+    def fmt(sec: int) -> str:
+        m, s = sec // 60, sec % 60
+        return f"{m:02d}:{s:02d}"
+
+    if st.session_state.timer_running:
+        st.session_state.timer_elapsed = int(time.time() - st.session_state.timer_start_ts)
+    total = st.session_state.timer_minutes * 60
+    remain = max(0, total - st.session_state.timer_elapsed)
+
+    st.caption("Timer")
+    st.subheader(fmt(remain))
+
+    t1, t2, t3 = st.columns(3)
+    if t1.button("Start", use_container_width=True, disabled=st.session_state.timer_running):
+        st.session_state.timer_running = True
+        st.session_state.timer_start_ts = time.time() - st.session_state.timer_elapsed
+    if t2.button("Pause", use_container_width=True, disabled=not st.session_state.timer_running):
+        st.session_state.timer_running = False
+        st.session_state.timer_elapsed = int(time.time() - st.session_state.timer_start_ts)
+    if t3.button("Reset", use_container_width=True):
+        st.session_state.timer_running = False
+        st.session_state.timer_elapsed = 0
+
+    if remain == 0 and st.session_state.timer_running:
+        st.session_state.timer_running = False
+        st.session_state.timer_elapsed = 0
+        st.session_state.time_log.append(
+            {"minutes": st.session_state.timer_minutes, "label": "Focused block", "ended_at": datetime.utcnow().isoformat()}
+        )
+        st.session_state._pending_action = "reflection"
+        st.success("Pomodoro complete! Logged a focused block.")
+
+    if st.session_state.time_log:
+        st.caption("Today’s time log")
+        for item in reversed(st.session_state.time_log[-5:]):
+            st.markdown(f"- **{item['minutes']}m** · {item['label']} · {item['ended_at'].split('T')[0]}")
+
+    st.divider()
+    st.markdown('<div class="card-title">📎 Upload Materials</div>', unsafe_allow_html=True)
+
+    files = st.file_uploader(
+        "Drop or choose files (PDF/DOCX/TXT/Images)",
+        type=["pdf", "doc", "docx", "txt", "png", "jpg", "jpeg"],
+        accept_multiple_files=True,
+        label_visibility="collapsed"
+    )
+    if files:
+        for f in files:
+            pos = f.tell()
+            data = f.read()
+            f.seek(pos)
+            st.session_state.files.append({"name": f.name, "bytes": len(data), "mime": f.type or "application/octet-stream"})
+        st.success(f"Added {len(files)} file(s) to context (names shared with the model).")
+
+    if st.session_state.files:
+        st.caption("Attached (names only):")
+        st.markdown("".join([f"<span class='file-pill'>🗂️ {f['name']}</span>" for f in st.session_state.files[-10:]]), unsafe_allow_html=True)
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
+
+# ================= CENTER: Chat ===========================================
+with center:
+    # ADVANCED CONTROLS (hidden unless enabled in secrets)
+    if SHOW_ADVANCED_CONTROLS:
+        cA, cB, cC = st.columns([1, 1, 2])
+        st.session_state.ground_search = cA.checkbox("🔎 Search grounding", value=st.session_state.ground_search)
+        st.session_state.use_code_exec = cB.checkbox("🧮 Code execution", value=st.session_state.use_code_exec)
+        st.session_state.url_context = cC.text_input("Optional URL context (paste one per line or leave blank)", value=st.session_state.url_context, placeholder="https://example.com/article …")
+    else:
+        # ensure hidden features are OFF & no visual footprint
+        st.session_state.ground_search = False
+        st.session_state.use_code_exec = False
+        st.session_state.url_context = ""
+        st.markdown("<div class='hidden-bar'><!-- advanced controls hidden --></div>", unsafe_allow_html=True)
+
+    st.markdown('<div class="chat-card">', unsafe_allow_html=True)
+    st.markdown('<div class="chat-head">Chat with Sylvia</div>', unsafe_allow_html=True)
+
+    if not st.session_state.chat_history:
+        st.session_state.chat_history.append({"role": "assistant", "content": "Hello! I’m Sylvia. What are you working on today?"})
+
+    scroll = st.container()
+    with scroll:
+        st.markdown('<div class="chat-scroll">', unsafe_allow_html=True)
+        for msg in st.session_state.chat_history:
+            cls = "assistant" if msg["role"] == "assistant" else "user"
+            st.markdown(f"<div class='{cls}'><div class='bubble'>{msg['content']}</div></div>", unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    with st.form("chat_form", clear_on_submit=True):
+        st.markdown('<div class="chat-input-wrap">', unsafe_allow_html=True)
+        user_text = st.text_area("Type your message…", height=90, label_visibility="collapsed")
+        submitted = st.form_submit_button("Send", type="primary", use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    if submitted and user_text.strip():
+        st.session_state.chat_history.append({"role": "user", "content": user_text})
+        assistant_text = "(Model unavailable) Please add GEMINI_API_KEY in Secrets and install requirements."
+
+        if client:
+            try:
+                tools = []
+                # Even when controls are shown, they're optional; hidden = tools stay off
+                if SHOW_ADVANCED_CONTROLS and st.session_state.ground_search:
+                    tools.append(types.Tool(google_search=types.GoogleSearch()))
+                if SHOW_ADVANCED_CONTROLS and st.session_state.use_code_exec:
+                    tools.append(types.Tool(code_execution=types.CodeExecution()))
+
+                contents = compose_turn(
+                    user_text=user_text,
+                    action_key=st.session_state._pending_action,
+                    filenames=[f["name"] for f in st.session_state.files],
+                )
+
+                resp = client.models.generate_content(
+                    model="gemini-flash-lite-latest",
+                    contents=contents,
+                    config=types.GenerateContentConfig(
+                        system_instruction=SYSTEM_PROMPT,
+                        tools=tools if tools else None,
+                        temperature=0.9,
+                        max_output_tokens=2048,
+                    ),
+                )
+                assistant_text = getattr(resp, "text", "") or "(No text response)"
+            except Exception as e:
+                assistant_text = f"Model call failed: {e}"
+
+        st.session_state.chat_history.append({"role": "assistant", "content": assistant_text})
+        st.session_state.progress_pct = min(100, st.session_state.progress_pct + 5)
+        st.session_state._pending_action = None
         st.rerun()
 
-    # ---- File Upload (Files API) ----
-    with st.expander(":material/attach_file: Files (PDF/TXT/DOCX)", expanded=True):
-        st.caption(
-            "Attach up to **5** files. They’ll be uploaded once and reused across turns.  "
-            "Files are stored temporarily (≈48 hours) in Google’s File store and count toward "
-            "your 20 GB storage cap until deleted (clicking ✖) or expired."
-        )
-        uploads = st.file_uploader(
-            "Upload files",
-            type=["pdf", "txt", "docx"],
-            accept_multiple_files=True,
-            label_visibility="collapsed"
-        )
+    st.markdown('</div>', unsafe_allow_html=True)
 
-        # Helper: Upload one file to Gemini Files API
-        def _upload_to_gemini(u):
-            # Infer MIME type
-            mime = u.type or (mimetypes.guess_type(u.name)[0] or "application/octet-stream")
-            data = u.getvalue()
-            # Upload with bytes buffer; SDK infers metadata, we provide mime
-            gfile = client.files.upload(
-                file=io.BytesIO(data),
-                config=types.UploadFileConfig(mime_type=mime)
-            )
-            # Persist minimal metadata (avoid keeping the raw bytes in memory)
-            return {
-                "name": u.name,
-                "size": len(data),
-                "mime": mime,
-                "file": gfile,          # has .name, .uri, .mime_type, .state, .expiration_time
-            }
 
-        # Add newly selected files (respect cap of 5)
-        if uploads:
-            slots_left = max(0, 5 - len(st.session_state.uploaded_files))
-            newly_added = []
-            for u in uploads[:slots_left]:
-                # Skip duplicates by (name, size)
-                already = any((u.name == f["name"] and u.size == f["size"]) for f in st.session_state.uploaded_files)
-                if already:
-                    continue
-                try:
-                    meta = _upload_to_gemini(u)
-                    st.session_state.uploaded_files.append(meta)
-                    newly_added.append(meta["name"])
-                except Exception as e:
-                    st.error(f"File upload failed for **{u.name}**: {e}")
+# ================= RIGHT: Path / Progress / Sessions ======================
+with right:
+    st.markdown('<div class="side-card">', unsafe_allow_html=True)
+    st.markdown('<div class="card-title">📍 Learning Path</div>', unsafe_allow_html=True)
+    steps = ["Goals", "Task Analysis", "Strategies", "Time Plan", "Resources"]
+    for i, name in enumerate(steps, start=1):
+        badge = "✓" if st.session_state.path_step > i else ("●" if st.session_state.path_step == i else str(i))
+        st.markdown(f"- **{badge} {name}**")
+    st.markdown('</div>', unsafe_allow_html=True)
 
-            if newly_added:
-                st.toast(f"Uploaded: {', '.join(newly_added)}")
-              
-        # Show current file list with remove buttons
-        st.markdown("**Attached files**")
-        if st.session_state.uploaded_files:
-            for idx, meta in enumerate(st.session_state.uploaded_files):
-                left, right = st.columns([0.88, 0.12])
-                with left:
-                    st.write(
-                        f"• {meta['name']}"
-                        f"<small>{human_size(meta['size'])} · {meta['mime']}</small>",
-                        unsafe_allow_html=True
-                    )
-                with right:
-                    if st.button("✖", key=f"remove_{idx}", help="Remove this file"):
-                      try:
-                        client.files.delete(name=meta['file'].name)
-                      except Exception:
-                          pass
-                      st.session_state.uploaded_files.pop(idx)
-                      st.rerun()
-            st.caption(f"{5 - len(st.session_state.uploaded_files)} slots remaining.")
-        else:
-            st.caption("No files attached.")
+    st.markdown('<div class="side-card">', unsafe_allow_html=True)
+    st.markdown('<div class="card-title">🎯 Progress</div>', unsafe_allow_html=True)
+    st.write(f"Task Completion: **{st.session_state.progress_pct}%**")
+    st.markdown(
+        f'<div class="progress-outer"><div class="progress-inner" style="width:{st.session_state.progress_pct}%;"></div></div>',
+        unsafe_allow_html=True
+    )
+    st.markdown('</div>', unsafe_allow_html=True)
 
-    #show Stored files on Google (server side) --
-    with st.expander("🛠️ Developer: See and Delete all files stored on Google server", expanded=False):
-        try:
-            files_list = client.files.list()
-            if not files_list:
-                st.caption("No active files on server.")
-            else:
-                for f in files_list:
-                    exp = getattr(f, "expiration_time", None)
-                    exp_str = exp if exp else "?"
-                    size = getattr(f, "size_bytes", None)
-                    size_str = f"{size/1024:.1f} KB" if size else "?"
-                    st.write(
-                        f"• **{f.name}**  "
-                        f"({f.mime_type}, {size_str})  "
-                        f"Expires: {exp_str}"
-                    )
-                if st.button("🗑️ Delete all files", use_container_width=True):
-                    failed = []
-                    for f in files_list:
-                        try:
-                            client.files.delete(name=f.name)
-                        except Exception as e:
-                            failed.append(f.name)
-                    if failed:
-                        st.error(f"Failed to delete: {', '.join(failed)}")
-                    else:
-                        st.success("All files deleted from server.")
-                        st.rerun()
-        except Exception as e:
-            st.error(f"Could not fetch files list: {e}")
+    st.markdown('<div class="side-card">', unsafe_allow_html=True)
+    st.markdown('<div class="card-title">📁 Session</div>', unsafe_allow_html=True)
+    os.makedirs(st.session_state.sessions_dir, exist_ok=True)
+    s1, s2 = st.columns(2)
+    if s1.button("💾 Save Session", use_container_width=True):
+        payload = {
+            "ts": datetime.utcnow().isoformat(),
+            "chat_history": st.session_state.chat_history,
+            "files": st.session_state.files,
+            "progress_pct": st.session_state.progress_pct,
+            "path_step": st.session_state.path_step,
+            "time_log": st.session_state.time_log,
+        }
+        fname = os.path.join(st.session_state.sessions_dir, f"session_{int(time.time())}.json")
+        with open(fname, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+        st.success(f"Session saved: {os.path.basename(fname)}")
+    if s2.button("🗑️ Clear", use_container_width=True):
+        st.session_state.chat_history = []
+        st.session_state.files = []
+        st.session_state.progress_pct = 0
+        st.session_state.path_step = 1
+        st.session_state.time_log = []
+        st.success("Cleared current session.")
 
-#######################################
-# Enable chat container and chat set-up
-#######################################
+    e1, e2 = st.columns(2)
+    export_payload = json.dumps(
+        {
+            "chat_history": st.session_state.chat_history,
+            "files": st.session_state.files,
+            "progress_pct": st.session_state.progress_pct,
+            "path_step": st.session_state.path_step,
+            "time_log": st.session_state.time_log,
+        }, ensure_ascii=False, indent=2
+    ).encode("utf-8")
+    e1.download_button("📤 Export JSON", export_payload, file_name="sylvia_session.json", mime="application/json", use_container_width=True)
+    if e2.button("➕ New Session", use_container_width=True):
+        st.session_state.chat_history = []
+        st.session_state.progress_pct = 0
+        st.session_state.path_step = 1
+        st.session_state.time_log = []
+        st.toast("Started a new session.", icon="✨")
+
+    saved = sorted(
+        (fn for fn in os.listdir(st.session_state.sessions_dir) if fn.endswith(".json")),
+        key=lambda x: os.path.getmtime(os.path.join(st.session_state.sessions_dir, x)),
+        reverse=True
+    )[:5]
+    if saved:
+        st.markdown('<div class="card-title">📜 Saved</div>', unsafe_allow_html=True)
+        for fn in saved:
+            p = os.path.join(st.session_state.sessions_dir, fn)
+            cL, cR = st.columns([0.65, 0.35])
+            cL.markdown(f"- {fn}")
+            if cR.button("Load", key=f"load_{fn}"):
+                with open(p, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                st.session_state.chat_history = data.get("chat_history", [])
+                st.session_state.files = data.get("files", [])
+                st.session_state.progress_pct = data.get("progress_pct", 0)
+                st.session_state.path_step = data.get("path_step", 1)
+                st.session_state.time_log = data.get("time_log", [])
+                st.success(f"Loaded {fn}")
+                st.rerun()
+
+
+# --- Footer status ---------------------------------------------------------
 with st.container():
-    # Replay chat history
-    for msg in st.session_state.chat_history:
-        avatar = "👤" if msg["role"] == "user" else ":material/robot_2:"  # <-- These emoji's can be changed
-        with st.chat_message(msg["role"], avatar=avatar):
-            st.markdown(msg["parts"])
-
-def _ensure_files_active(files, max_wait_s: float = 12.0):
-    """Poll the Files API for PROCESSING files until ACTIVE or timeout."""
-    deadline = time.time() + max_wait_s
-    any_processing = True
-    while any_processing and time.time() < deadline:
-        any_processing = False
-        for i, meta in enumerate(files):
-            fobj = meta["file"]
-            if getattr(fobj, "state", "") not in ("ACTIVE",):
-                any_processing = True
-                try:
-                    updated = client.files.get(name=fobj.name)
-                    files[i]["file"] = updated
-                except Exception:
-                    pass
-        if any_processing:
-            time.sleep(0.6)
-          
-if user_prompt := st.chat_input("Message 'your bot name'…"):
-    # Record & show user message
-    st.session_state.chat_history.append({"role": "user", "parts": user_prompt})
-    with st.chat_message("user", avatar="👤"):  # <-- This emoji can be changed
-        st.markdown(user_prompt)
-
-    # Send message and display full response (no streaming)
-    with st.chat_message("assistant", avatar=":material/robot_2:"):  # <-- This bot image can be replaced with an emoji
-        try:
-            # If files are attached, ensure they're ready and include them in this turn
-            contents_to_send = None
-            if st.session_state.uploaded_files:
-                _ensure_files_active(st.session_state.uploaded_files)
-                contents_to_send = [
-                    types.Part.from_text(text=user_prompt)
-                ] + [meta["file"] for meta in st.session_state.uploaded_files]
-
-            # Show spinner with message
-            with st.spinner("🔍 Thinking about what I know about this ..."):
-                if contents_to_send is None:
-                    # No files attached: keep original behavior
-                    response = st.session_state.chat.send_message(user_prompt)
-                else:
-                    # Files attached: pass a parts list (text + File objects)
-                    response = st.session_state.chat.send_message(contents_to_send)
-
-            # Extract the full response text
-            full_response = response.text if hasattr(response, "text") else str(response)
-
-            # Display the full response
-            st.markdown(full_response)
-
-        except Exception as e:
-            full_response = f"❌ Error from Gemini: {e}"
-            st.error(full_response)
-
-        # Record assistant reply
-        st.session_state.chat_history.append({"role": "assistant", "parts": full_response})
-
-# Footer
-st.markdown(
-    "<div style='text-align:center;color:gray;font-size:12px;'>"
-    "I can make mistakes—please verify important information."
-    "</div>",
-    unsafe_allow_html=True,
-)
+    status = []
+    status.append(("Model", "gemini-flash-lite-latest"))
+    status.append(("Search", "ON" if (SHOW_ADVANCED_CONTROLS and st.session_state.ground_search) else "OFF"))
+    status.append(("CodeExec", "ON" if (SHOW_ADVANCED_CONTROLS and st.session_state.use_code_exec) else "OFF"))
+    status.append(("Files", f"{len(st.session_state.files)}"))
+    st.caption(" | ".join([f"**{k}**: {v}" for k, v in status]))
