@@ -17,13 +17,50 @@ except Exception as _e:
     genai = None
     types = None
 
-
 # --- Page Config -----------------------------------------------------------
 st.set_page_config(
     page_title="Sylvia – Learning Facilitator",
     page_icon="🎓",
     layout="wide",
 )
+
+# --- Fix hidden title & add sticky banner ---------------------------------
+st.markdown("""
+<style>
+/* If previous CSS hid headers, undo it */
+h1, h2, h3, .stMarkdown h1, .stMarkdown h2, .stMarkdown h3 {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+
+/* Some templates hide Streamlit's top header; that's fine,
+   but we still want our in-page title visible. */
+header, footer, #MainMenu { visibility: hidden; }  /* keep Streamlit chrome hidden */
+
+/* App title banner */
+.app-title {
+  position: sticky;         /* stays at top while scrolling */
+  top: 0;
+  z-index: 999;
+  background: #E8F5E9;      /* match your light-green theme */
+  padding: 12px 16px;
+  margin: -1rem -1rem 1rem -1rem; /* stretch full width of container */
+  border-bottom: 1px solid #d4eed8;
+  font-weight: 700;
+  font-size: 1.25rem;
+  line-height: 1.3;
+  color: #0D2B12;
+  border-top-left-radius: 12px;
+  border-top-right-radius: 12px;
+}
+</style>
+
+<div class="app-title">🎓 Sylvia – Learning Facilitator</div>
+""", unsafe_allow_html=True)
+
+# (Optional) If you previously relied on st.title(), you can keep it too:
+# st.title("Sylvia – Learning Facilitator")
 
 
 
