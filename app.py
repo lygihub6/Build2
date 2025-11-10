@@ -170,33 +170,80 @@ html, body, .stApp { background: var(--bg); }
 .header-title { font-size: 28px; font-weight: 800; color: var(--brand); }
 .header-sub{ font-size: 13px; color:#64748b; }
 
-/* Chat */
+# --- Chat Card styles (put near your other CSS) ----------------------------
+st.markdown("""
+<style>
 .chat-card{
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  height: 70vh;
-  display:flex; flex-direction:column;
-  overflow:hidden;
-  box-shadow: 0 8px 24px rgba(0,0,0,.06);
+  background:#E8F5E9;
+  border:1px solid #d4eed8;
+  border-radius:16px;
+  overflow:hidden;                 /* keeps header/input visually inside */
+  box-shadow: 0 1px 1px rgba(0,0,0,.03);
 }
-.chat-head{
-  border-bottom:1px solid var(--border);
-  padding:10px 14px; font-weight:600; color:#1e293b;
+.chat-header{
+  background:#dff3e6;
+  padding:12px 16px;
+  font-weight:700;
+  color:#0D2B12;
+  border-bottom:1px solid #d4eed8;
 }
-.chat-scroll{
-  flex:1 1 auto; overflow-y:auto; padding: 14px;
-  background: linear-gradient(to bottom, #E8F5E9, #E8F5E9);
+.chat-body{
+  padding:14px 16px;
+  height:420px;                    /* adjust as you like */
+  overflow-y:auto;                 /* scrolls messages */
 }
-.bubble{
-  max-width: 65ch; padding:10px 14px; border-radius:14px;
-  margin-bottom: 10px; line-height:1.45; font-size: 0.96rem;
+.chat-input{
+  border-top:1px solid #d4eed8;
+  padding:12px 16px 16px 16px;
 }
-.user .bubble{ background: var(--brand); color:#fff; margin-left:auto; border-bottom-right-radius:6px; }
-.assistant .bubble{ background: var(--surface-alt); border:1px solid var(--border); color:#0f172a; border-bottom-left-radius:6px; }
-.meta{ font-size: 12px; color:#94a3b8; margin-top:-4px; margin-bottom: 6px; }
+.chat-send .stButton>button{
+  width:100%;
+  background:#e95d55;              /* your coral button */
+  color:white; border:none;
+  padding:10px 14px; border-radius:10px;
+}
+</style>
+""", unsafe_allow_html=True)
 
-.chat-input-wrap{ border-top:1px solid var(--border); padding:10px; background:#fff; }
+# --- Chat Card markup ------------------------------------------------------
+chat_card = st.container()
+with chat_card:
+    st.markdown("<div class='chat-card'>", unsafe_allow_html=True)
+
+    # Header lives INSIDE the card
+    st.markdown("<div class='chat-header'>Chat with Sylvia</div>", unsafe_allow_html=True)
+
+    # Messages area (scrollable)
+    st.markdown("<div class='chat-body'>", unsafe_allow_html=True)
+    for message in st.session_state.get("chat_history", []):
+        # message should already be HTML or simple text; render safely as needed
+        st.markdown(message, unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)  # close .chat-body
+
+    # Input + send button inside the same card
+    st.markdown("<div class='chat-input'>", unsafe_allow_html=True)
+    user_text = st.text_area(
+        label="",
+        key="user_text",
+        label_visibility="collapsed",
+        placeholder="Type your message…",
+        height=120
+    )
+    st.markdown("</div>", unsafe_allow_html=True)  # close .chat-input
+
+    # Send button row (also inside the card)
+    st.markdown("<div class='chat-send'>", unsafe_allow_html=True)
+    send_clicked = st.button("Send")
+    st.markdown("</div></div>", unsafe_allow_html=True)  # close .chat-card
+
+# --- Handle send -----------------------------------------------------------
+if send_clicked and user_text.strip():
+    st.session_state.setdefault("chat_history", []).append(
+        f"<div class='msg user'>{user_text.strip()}</div>"
+    )
+    # Clear the textarea after sending
+    st.session_state["user_text"] = ""
+    st.experimental_rerun()
 
 /* Cards */
 .side-card{
