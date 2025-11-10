@@ -209,7 +209,17 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
-
+st.markdown("<div class='chat-card'>", unsafe_allow_html=True)
+st.markdown("<div class='chat-header'>Chat with Sylvia</div>", unsafe_allow_html=True)
+st.markdown("<div class='chat-body'>", unsafe_allow_html=True)
+# ... render messages ...
+st.markdown("</div>", unsafe_allow_html=True)  # close chat-body
+st.markdown("<div class='chat-input'>", unsafe_allow_html=True)
+user_text = st.text_area("", key="user_text", label_visibility="collapsed", height=120, placeholder="Type your message…")
+st.markdown("</div>", unsafe_allow_html=True)
+st.markdown("<div class='chat-send'>", unsafe_allow_html=True)
+send_clicked = st.button("Send")
+st.markdown("</div></div>", unsafe_allow_html=True)  # close chat-card
 
 # --- Chat Card markup ------------------------------------------------------
 chat_card = st.container()
