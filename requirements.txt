@@ -1,4 +1,7 @@
-# Minimum dependencies; add more per user requests:
-google-genai>=1.26.0      # new GenAI SDK with Search grounding
-streamlit>=1.49.0         # current Streamlit release
-pillow>=11.3.0            # image display (PIL)
+# Core dependencies for Sylvia Learning Facilitator App
+google-genai>=0.8.0       # Google GenAI SDK for Gemini API
+streamlit>=1.40.0         # Latest Streamlit for web interface
+pillow>=11.0.0           # Image handling (if bot.png is added)
+
+# Optional but recommended
+python-dateutil>=2.8.2    # Better date/time handling
